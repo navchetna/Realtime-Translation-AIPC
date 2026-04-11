@@ -186,10 +186,12 @@ class IndicTrans2OpenVINO:
         attention_mask: np.ndarray
     ) -> np.ndarray:
         """Run encoder to get encoder hidden states."""
-        return self.encoder({
+        infer_request = self.encoder.create_infer_request()
+        infer_request.infer({
             "input_ids": input_ids,
             "attention_mask": attention_mask
-        })[0]
+        })
+        return np.array(infer_request.get_output_tensor(0).data, copy=True)
     
     def decode_prefill(
         self,
@@ -198,12 +200,16 @@ class IndicTrans2OpenVINO:
         encoder_attention_mask: np.ndarray
     ) -> Tuple[np.ndarray, List[Tuple[np.ndarray, ...]]]:
         """Run decoder prefill step (first token generation)."""
-        results = self.decoder_prefill([
+        infer_request = self.decoder_prefill.create_infer_request()
+        infer_request.infer([
             decoder_input_ids,
             encoder_hidden_states,
             encoder_attention_mask
         ])
-        
+
+        num_outputs = len(self.decoder_prefill.outputs)
+        results = [np.array(infer_request.get_output_tensor(i).data, copy=True) for i in range(num_outputs)]
+
         logits = results[0]
         past_key_values = []
         
@@ -235,7 +241,11 @@ class IndicTrans2OpenVINO:
         for self_k, self_v, cross_k, cross_v in past_key_values:
             inputs.extend([self_k, self_v, cross_k, cross_v])
         
-        results = self.decoder_decode(inputs)
+        infer_request = self.decoder_decode.create_infer_request()
+        infer_request.infer(inputs)
+
+        num_outputs = len(self.decoder_decode.outputs)
+        results = [np.array(infer_request.get_output_tensor(i).data, copy=True) for i in range(num_outputs)]
         logits = results[0]
         
         new_past_key_values = []

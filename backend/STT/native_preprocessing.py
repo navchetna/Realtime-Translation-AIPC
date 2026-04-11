@@ -94,6 +94,10 @@ class NativeAudioPreprocessor:
         Returns:
             features: numpy array (n_mels, time)
         """
+        # librosa requires finite float input; sanitize once at the boundary.
+        audio = np.asarray(audio, dtype=np.float32)
+        audio = np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0)
+
         # Compute STFT
         stft = librosa.stft(
             audio,

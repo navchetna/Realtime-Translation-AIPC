@@ -3,6 +3,7 @@ import base64
 import logging
 import os
 import tempfile
+import io
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -104,9 +105,32 @@ def load_model():
 def _transcribe(audio_bytes: bytes, lang: str) -> str:
     """Run ASR inference on audio bytes and return transcribed text."""
     import numpy as np
+    import soundfile as sf
     
-    # We expect the frontend to send raw PCM float32 bytes here directly
-    audio_buffer = np.frombuffer(audio_bytes, dtype=np.float32)
+    audio_buffer: np.ndarray
+
+    # Preferred path: frontend sends raw Float32 PCM bytes (16kHz mono).
+    if len(audio_bytes) % 4 == 0:
+        audio_buffer = np.frombuffer(audio_bytes, dtype=np.float32)
+    else:
+        # Fallback path: decode encoded audio files (wav/webm/etc) if provided.
+        waveform, sr = sf.read(io.BytesIO(audio_bytes), dtype='float32')
+        if waveform.ndim > 1:
+            waveform = np.mean(waveform, axis=1)
+        if sr != 16000:
+            import librosa
+            waveform = librosa.resample(waveform, orig_sr=sr, target_sr=16000, res_type='kaiser_fast')
+        audio_buffer = waveform.astype(np.float32, copy=False)
+
+    if audio_buffer.size == 0:
+        raise ValueError("Received empty audio payload")
+
+    # Guarantee finite values for librosa to avoid ParameterError.
+    audio_buffer = np.nan_to_num(audio_buffer, nan=0.0, posinf=0.0, neginf=0.0)
+
+    # Clamp to normalized PCM range and ensure contiguous float32 array.
+    audio_buffer = np.clip(audio_buffer, -1.0, 1.0).astype(np.float32, copy=False)
+    audio_buffer = np.ascontiguousarray(audio_buffer)
 
     try:
         text = asr_model.transcribe(audio_buffer, lang=lang, decoding="ctc")

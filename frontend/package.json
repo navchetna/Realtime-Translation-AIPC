@@ -4,7 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "copy-vad-assets": "node ./scripts/copy-vad-assets.mjs",
+    "predev": "npm run copy-vad-assets",
     "dev": "vite",
+    "prebuild": "npm run copy-vad-assets",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -13,7 +16,7 @@
     "@ricky0123/vad-react": "^0.0.36",
     "@ricky0123/vad-web": "^0.0.30",
     "lucide-react": "^1.8.0",
-    "onnxruntime-web": "^1.24.3",
+    "onnxruntime-web": "1.17.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },
@@ -29,7 +32,6 @@
     "globals": "^17.4.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.0",
-    "vite": "^8.0.4",
-    "vite-plugin-static-copy": "^4.0.1"
+    "vite": "^8.0.4"
   }
 }

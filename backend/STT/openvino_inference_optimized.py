@@ -24,7 +24,7 @@ class IndicASROpenVINOOptimized:
         config_path="conformer_model",
         device="CPU",
         use_native_preprocessing=True,
-        force_fp32_on_gpu=True
+        force_fp32_on_gpu=False
     ):
         """
         Initialize optimized OpenVINO inference engine
@@ -211,7 +211,19 @@ class IndicASROpenVINOOptimized:
         else:
             features, length = self.preprocessor.preprocess_tensor(audio_input)
 
-        return features, np.array([length])
+        # Ensure length tensor always has shape [1] for model input "parameter:length".
+        if isinstance(length, np.ndarray):
+            length_arr = length.astype(np.int64, copy=False).reshape(-1)
+        else:
+            length_arr = np.array([int(length)], dtype=np.int64)
+
+        if length_arr.size == 0:
+            raise ValueError("Invalid audio length: empty length tensor")
+
+        if length_arr.size > 1:
+            length_arr = np.array([int(length_arr[0])], dtype=np.int64)
+
+        return features, length_arr
 
     def encode(self, audio_features, audio_length):
         """Run encoder inference"""

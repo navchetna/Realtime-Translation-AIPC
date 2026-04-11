@@ -63,4 +63,96 @@ export class TranslationService {
       return `[${targetLanguage}] ${text}`;
     }
   }
+
+  static async translateBatch(
+    text: string,
+    targetLanguages: string[],
+    sourceLanguage: string = "hi"
+  ): Promise<Record<string, string>> {
+    const apiUrl = import.meta.env.VITE_NMT_API_URL || 'http://localhost:8004/services/inference/pipeline';
+
+    const uniqueTargets = Array.from(new Set(targetLanguages));
+    const languageCodes = uniqueTargets.map((langName) => ({
+      langName,
+      code: this.langMap[langName] || 'hi',
+    }));
+
+    const passthrough: Record<string, string> = {};
+    const requests = languageCodes
+      .filter(({ code, langName }) => {
+        if (code === sourceLanguage) {
+          passthrough[langName] = text;
+          return false;
+        }
+        return true;
+      })
+      .map(({ code }) => ({
+        source: text,
+        targetLanguage: code,
+      }));
+
+    if (requests.length === 0) {
+      return passthrough;
+    }
+
+    try {
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          pipelineTasks: [
+            {
+              taskType: 'translation',
+              config: {
+                language: {
+                  sourceLanguage,
+                },
+                serviceId: 'indictrans2-indic-indic',
+              },
+            },
+          ],
+          inputData: {
+            requests,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`NMT batch request failed with status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const outputs = data?.pipelineResponse?.[0]?.output || [];
+
+      const byCode: Record<string, string> = {};
+      outputs.forEach((item: any, index: number) => {
+        if (item?.targetLanguage && typeof item.target === 'string') {
+          byCode[item.targetLanguage] = item.target;
+          return;
+        }
+
+        // Backward compatibility: some server versions don't include targetLanguage in output.
+        const req = requests[index];
+        if (req && typeof item?.target === 'string') {
+          byCode[req.targetLanguage] = item.target;
+        }
+      });
+
+      const result: Record<string, string> = { ...passthrough };
+      for (const { langName, code } of languageCodes) {
+        result[langName] = byCode[code] || `[${langName}] ${text}`;
+      }
+
+      return result;
+    } catch (e) {
+      console.warn('NMT batch backend failed, falling back to mock responses.', e);
+      const fallback: Record<string, string> = {};
+      for (const lang of uniqueTargets) {
+        fallback[lang] = `[${lang}] ${text}`;
+      }
+      return fallback;
+    }
+  }
 }

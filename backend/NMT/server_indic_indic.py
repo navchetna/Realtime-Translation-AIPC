@@ -67,8 +67,14 @@ class InputItem(BaseModel):
     source: str
 
 
+class BatchRequestItem(BaseModel):
+    source: str
+    targetLanguage: str
+
+
 class InputData(BaseModel):
     input: list[InputItem] | None = None
+    requests: list[BatchRequestItem] | None = None
 
 
 class PipelineRequest(BaseModel):
@@ -79,6 +85,7 @@ class PipelineRequest(BaseModel):
 class OutputItem(BaseModel):
     source: str
     target: str
+    targetLanguage: str | None = None
 
 
 class PipelineResponseItem(BaseModel):
@@ -152,24 +159,72 @@ async def inference_pipeline(request: PipelineRequest):
     if translator is None:
         raise HTTPException(status_code=503, detail="NMT model not loaded")
 
-    # Resolve language codes
+    # Resolve source language once. Targets can be provided per item in batch mode.
     src_code = task.config.language.sourceLanguage.lower()
-    tgt_code = (task.config.language.targetLanguage or "").lower()
+    src_flores = LANG_CODE_TO_FLORES.get(src_code)
+    if src_flores is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported source language: '{src_code}'. Supported: {list(LANG_CODE_TO_FLORES.keys())}",
+        )
 
+    # Batch mode: a single request can include many (text, targetLanguage) items.
+    if request.inputData.requests:
+        grouped: dict[str, list[tuple[int, str, str]]] = {}
+        outputs: list[OutputItem | None] = [None] * len(request.inputData.requests)
+
+        for i, item in enumerate(request.inputData.requests):
+            tgt_code = item.targetLanguage.lower()
+            if src_code == tgt_code:
+                outputs[i] = OutputItem(source=item.source, target=item.source, targetLanguage=tgt_code)
+                continue
+
+            tgt_flores = LANG_CODE_TO_FLORES.get(tgt_code)
+            if tgt_flores is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported target language: '{tgt_code}'. Supported: {list(LANG_CODE_TO_FLORES.keys())}",
+                )
+
+            grouped.setdefault(tgt_code, []).append((i, item.source, tgt_flores))
+
+        async def translate_group(target_code: str, rows: list[tuple[int, str, str]]):
+            texts = [row[1] for row in rows]
+            tgt_flores = rows[0][2]
+            translated = await asyncio.to_thread(_translate, texts, src_flores, tgt_flores)
+            for row, tgt_text in zip(rows, translated):
+                idx, src_text, _ = row
+                outputs[idx] = OutputItem(source=src_text, target=tgt_text, targetLanguage=target_code)
+
+        await asyncio.gather(*[
+            translate_group(target_code, rows)
+            for target_code, rows in grouped.items()
+        ])
+
+        final_outputs = [o for o in outputs if o is not None]
+        return PipelineResponse(
+            pipelineResponse=[
+                PipelineResponseItem(
+                    taskType="translation",
+                    config={
+                        "language": {
+                            "sourceLanguage": src_code,
+                        }
+                    },
+                    output=final_outputs,
+                )
+            ]
+        )
+
+    # Legacy mode: keep Bhashini single-target input format.
+    tgt_code = (task.config.language.targetLanguage or "").lower()
     if not tgt_code:
         raise HTTPException(status_code=400, detail="targetLanguage is required")
 
     if src_code == tgt_code:
         raise HTTPException(status_code=400, detail="sourceLanguage and targetLanguage must differ")
 
-    src_flores = LANG_CODE_TO_FLORES.get(src_code)
     tgt_flores = LANG_CODE_TO_FLORES.get(tgt_code)
-
-    if src_flores is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported source language: '{src_code}'. Supported: {list(LANG_CODE_TO_FLORES.keys())}",
-        )
     if tgt_flores is None:
         raise HTTPException(
             status_code=400,
@@ -180,11 +235,10 @@ async def inference_pipeline(request: PipelineRequest):
         raise HTTPException(status_code=400, detail="inputData.input is empty")
 
     source_texts = [item.source for item in request.inputData.input]
-
     translations = await asyncio.to_thread(_translate, source_texts, src_flores, tgt_flores)
 
     outputs = [
-        OutputItem(source=src, target=tgt)
+        OutputItem(source=src, target=tgt, targetLanguage=tgt_code)
         for src, tgt in zip(source_texts, translations)
     ]
 

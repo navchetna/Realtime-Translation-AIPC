@@ -290,12 +290,40 @@ option {
   flex-direction: column;
 }
 
+.asrPanelCollapsed {
+  height: auto;
+}
+
+.asrHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .asrTitle {
   font-size: 12px;
   color: var(--text-muted);
   margin-bottom: 8px;
   text-transform: uppercase;
   letter-spacing: 1px;
+}
+
+.asrToggle {
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  color: var(--text-muted);
+  border-radius: 8px;
+  height: 28px;
+  width: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.asrToggle:hover {
+  color: var(--text-main);
+  border-color: var(--primary);
 }
 
 .asrContent {
