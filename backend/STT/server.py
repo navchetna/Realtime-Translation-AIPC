@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import logging
 import os
@@ -12,6 +11,9 @@ from openvino_inference_optimized import IndicASROpenVINOOptimized
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Set LOG_IO=0 to suppress per-request input/output logging. Default: enabled.
+LOG_IO = os.getenv("LOG_IO", "1").strip() not in ("0", "false", "no", "off")
 
 # --- Pydantic models for Bhashini pipeline request/response ---
 
@@ -141,7 +143,7 @@ def _transcribe(audio_bytes: bytes, lang: str) -> str:
 
 
 @app.post("/services/inference/pipeline", response_model=PipelineResponse)
-async def inference_pipeline(request: PipelineRequest):
+def inference_pipeline(request: PipelineRequest):
     if not request.pipelineTasks:
         raise HTTPException(status_code=400, detail="pipelineTasks is empty")
 
@@ -173,7 +175,20 @@ async def inference_pipeline(request: PipelineRequest):
         else:
             raise HTTPException(status_code=400, detail="Each audio item must have audioContent or audioUri")
 
-        text = await asyncio.to_thread(_transcribe, audio_bytes, lang_code)
+        audio_bytes_len = len(audio_bytes)
+        if LOG_IO:
+            logger.info(
+                "[ASR  INPUT] lang=%s  audio_bytes=%d  (~%.2f s at 16kHz float32)",
+                lang_code,
+                audio_bytes_len,
+                audio_bytes_len / (16000 * 4),
+            )
+
+        text = _transcribe(audio_bytes, lang_code)
+
+        if LOG_IO:
+            logger.info("[ASR OUTPUT] lang=%s  transcript=%r", lang_code, text)
+
         outputs.append(OutputItem(source=text))
 
     return PipelineResponse(

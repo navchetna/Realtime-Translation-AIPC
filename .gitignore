@@ -36,6 +36,7 @@ ENV/
 conformer_model
 env.bak/
 venv.bak/
+.vite
 
 # OpenVINO & Machine Learning Models
 openvino_models/

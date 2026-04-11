@@ -96,39 +96,53 @@ export class TranslationService {
     }
 
     try {
+      const payload = {
+        pipelineTasks: [
+          {
+            taskType: 'translation',
+            config: {
+              language: {
+                sourceLanguage,
+              },
+              serviceId: 'indictrans2-indic-indic',
+            },
+          },
+        ],
+        inputData: {
+          requests,
+        },
+      };
+
+      console.log('[TranslationService] Batch request payload:', JSON.stringify(payload, null, 2));
+      console.log('[TranslationService] Requesting:', apiUrl);
+      console.log('[TranslationService] Unique targets:', uniqueTargets);
+      console.log('[TranslationService] Requests to send:', requests);
+
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          pipelineTasks: [
-            {
-              taskType: 'translation',
-              config: {
-                language: {
-                  sourceLanguage,
-                },
-                serviceId: 'indictrans2-indic-indic',
-              },
-            },
-          ],
-          inputData: {
-            requests,
-          },
-        }),
+        body: JSON.stringify(payload),
       });
+
+      console.log('[TranslationService] Response status:', response.status);
 
       if (!response.ok) {
         throw new Error(`NMT batch request failed with status: ${response.status}`);
       }
 
       const data = await response.json();
+      console.log('[TranslationService] Full response:', JSON.stringify(data, null, 2));
+      
       const outputs = data?.pipelineResponse?.[0]?.output || [];
+      console.log('[TranslationService] Parsed outputs:', outputs);
 
       const byCode: Record<string, string> = {};
       outputs.forEach((item: any, index: number) => {
+        console.log(`[TranslationService] Processing output[${index}]:`, item);
         if (item?.targetLanguage && typeof item.target === 'string') {
+          console.log(`[TranslationService]   Mapped by targetLanguage: ${item.targetLanguage} -> "${item.target}"`);
           byCode[item.targetLanguage] = item.target;
           return;
         }
@@ -136,15 +150,23 @@ export class TranslationService {
         // Backward compatibility: some server versions don't include targetLanguage in output.
         const req = requests[index];
         if (req && typeof item?.target === 'string') {
+          console.log(`[TranslationService]   Mapped by request index: ${req.targetLanguage} -> "${item.target}"`);
           byCode[req.targetLanguage] = item.target;
         }
       });
 
+      console.log('[TranslationService] byCode mapping:', byCode);
+      console.log('[TranslationService] languageCodes:', languageCodes);
+
       const result: Record<string, string> = { ...passthrough };
       for (const { langName, code } of languageCodes) {
+        // Skip languages already handled as passthrough (source == target).
+        if (langName in passthrough) continue;
         result[langName] = byCode[code] || `[${langName}] ${text}`;
+        console.log(`[TranslationService] result[${langName}] = ${result[langName]}`);
       }
 
+      console.log('[TranslationService] Final result object:', result);
       return result;
     } catch (e) {
       console.warn('NMT batch backend failed, falling back to mock responses.', e);

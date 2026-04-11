@@ -4,7 +4,6 @@ Uses IndicTrans2 OpenVINO inference engine.
 Port: 8003
 """
 
-import asyncio
 import logging
 import os
 
@@ -13,6 +12,9 @@ from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Set LOG_IO=0 to suppress per-request input/output logging. Default: enabled.
+LOG_IO = os.getenv("LOG_IO", "1").strip() not in ("0", "false", "no", "off")
 
 # Bhashini 2-letter code -> FLORES code mapping
 LANG_CODE_TO_FLORES = {
@@ -137,7 +139,7 @@ def _translate(sentences: list[str], src_lang: str, tgt_lang: str) -> list[str]:
 
 
 @app.post("/services/inference/pipeline", response_model=PipelineResponse)
-async def inference_pipeline(request: PipelineRequest):
+def inference_pipeline(request: PipelineRequest):
     if not request.pipelineTasks:
         raise HTTPException(status_code=400, detail="pipelineTasks is empty")
 
@@ -185,18 +187,18 @@ async def inference_pipeline(request: PipelineRequest):
 
             grouped.setdefault(tgt_code, []).append((i, item.source, tgt_flores))
 
-        async def translate_group(target_code: str, rows: list[tuple[int, str, str]]):
+        for target_code, rows in grouped.items():
             texts = [row[1] for row in rows]
             tgt_flores = rows[0][2]
-            translated = await asyncio.to_thread(_translate, texts, src_flores, tgt_flores)
+            if LOG_IO:
+                for t in texts:
+                    logger.info("[NMT  INPUT] %s->%s  source=%r", src_code, target_code, t)
+            translated = _translate(texts, src_flores, tgt_flores)
             for row, tgt_text in zip(rows, translated):
                 idx, src_text, _ = row
+                if LOG_IO:
+                    logger.info("[NMT OUTPUT] %s->%s  source=%r  target=%r", src_code, target_code, src_text, tgt_text)
                 outputs[idx] = OutputItem(source=src_text, target=tgt_text, targetLanguage=target_code)
-
-        await asyncio.gather(*[
-            translate_group(target_code, rows)
-            for target_code, rows in grouped.items()
-        ])
 
         final_outputs = [o for o in outputs if o is not None]
         return PipelineResponse(
@@ -231,8 +233,13 @@ async def inference_pipeline(request: PipelineRequest):
         raise HTTPException(status_code=400, detail="inputData.input is empty")
 
     source_texts = [item.source for item in request.inputData.input]
-
-    translations = await asyncio.to_thread(_translate, source_texts, src_flores, tgt_flores)
+    if LOG_IO:
+        for t in source_texts:
+            logger.info("[NMT  INPUT] %s->%s  source=%r", src_code, tgt_code, t)
+    translations = _translate(source_texts, src_flores, tgt_flores)
+    if LOG_IO:
+        for src, tgt in zip(source_texts, translations):
+            logger.info("[NMT OUTPUT] %s->%s  source=%r  target=%r", src_code, tgt_code, src, tgt)
 
     outputs = [
         OutputItem(source=src, target=tgt, targetLanguage=tgt_code)

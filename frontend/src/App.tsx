@@ -84,6 +84,10 @@ function App() {
     const runBatchTranslation = async () => {
       setIsTranslating(true);
       const currentTargets = { ...panelTargets };
+      
+      console.log('[App] Starting batch translation for transcript:', latestTranscript);
+      console.log('[App] Current targets:', currentTargets);
+      console.log('[App] Target language names:', Object.values(currentTargets));
 
       const languageResults = await TranslationService.translateBatch(
         latestTranscript,
@@ -91,13 +95,24 @@ function App() {
         'hi'
       );
 
+      console.log('[App] Received languageResults:', languageResults);
+      console.log('[App] panelTargets:', currentTargets);
+      console.log('[App] Will set translations:');
+      console.log('[App]   panel-1: languageResults[' + currentTargets['panel-1'] + '] = ' + languageResults[currentTargets['panel-1']]);
+      console.log('[App]   panel-2: languageResults[' + currentTargets['panel-2'] + '] = ' + languageResults[currentTargets['panel-2']]);
+      console.log('[App]   panel-3: languageResults[' + currentTargets['panel-3'] + '] = ' + languageResults[currentTargets['panel-3']]);
+
       if (cancelled) return;
 
-      setPanelTranslations(prev => ({
-        'panel-1': appendChunk(prev['panel-1'], languageResults[currentTargets['panel-1']] || ''),
-        'panel-2': appendChunk(prev['panel-2'], languageResults[currentTargets['panel-2']] || ''),
-        'panel-3': appendChunk(prev['panel-3'], languageResults[currentTargets['panel-3']] || ''),
-      }));
+      setPanelTranslations(prev => {
+        const newState = {
+          'panel-1': appendChunk(prev['panel-1'], languageResults[currentTargets['panel-1']] || ''),
+          'panel-2': appendChunk(prev['panel-2'], languageResults[currentTargets['panel-2']] || ''),
+          'panel-3': appendChunk(prev['panel-3'], languageResults[currentTargets['panel-3']] || ''),
+        };
+        console.log('[App] New panelTranslations state:', newState);
+        return newState;
+      });
       setIsTranslating(false);
     };
 
