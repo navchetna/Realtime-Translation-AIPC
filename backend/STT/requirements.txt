@@ -1,0 +1,10 @@
+openvino==2025.4
+transformers
+librosa
+soundfile
+tqdm 
+resampy
+numpy
+requests
+uvicorn
+fastapi
