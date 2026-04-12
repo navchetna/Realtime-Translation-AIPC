@@ -6,6 +6,7 @@ Port: 8003
 
 import logging
 import os
+import signal
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -106,6 +107,30 @@ class PipelineResponse(BaseModel):
 app = FastAPI(title="IndicTrans2 EN->Indic NMT API (Bhashini-compatible)")
 
 translator = None
+_previous_sigint_handler = None
+_previous_sigterm_handler = None
+
+
+def _request_translator_stop(reason: str):
+    if translator is not None and hasattr(translator, "request_stop"):
+        logger.info("Shutdown signal received (%s). Requesting NMT generation stop...", reason)
+        translator.request_stop()
+
+
+def _install_signal_handlers():
+    global _previous_sigint_handler, _previous_sigterm_handler
+
+    _previous_sigint_handler = signal.getsignal(signal.SIGINT)
+    _previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
+
+    def _handler(signum, frame):
+        _request_translator_stop(f"signal={signum}")
+        previous = _previous_sigint_handler if signum == signal.SIGINT else _previous_sigterm_handler
+        if callable(previous):
+            previous(signum, frame)
+
+    signal.signal(signal.SIGINT, _handler)
+    signal.signal(signal.SIGTERM, _handler)
 
 
 @app.on_event("startup")
@@ -131,7 +156,13 @@ def load_model():
     if warmup_iters > 0:
         translator.warmup(warmup_iters)
 
+    _install_signal_handlers()
     logger.info("EN->Indic NMT model ready")
+
+
+@app.on_event("shutdown")
+def shutdown_model():
+    _request_translator_stop("lifespan-shutdown")
 
 
 def _translate(sentences: list[str], src_lang: str, tgt_lang: str) -> list[str]:
@@ -193,7 +224,12 @@ def inference_pipeline(request: PipelineRequest):
             if LOG_IO:
                 for t in texts:
                     logger.info("[NMT  INPUT] %s->%s  source=%r", src_code, target_code, t)
-            translated = _translate(texts, src_flores, tgt_flores)
+            try:
+                translated = _translate(texts, src_flores, tgt_flores)
+            except RuntimeError as exc:
+                if "Shutdown requested" in str(exc):
+                    raise HTTPException(status_code=503, detail="Server is shutting down") from exc
+                raise
             for row, tgt_text in zip(rows, translated):
                 idx, src_text, _ = row
                 if LOG_IO:
@@ -236,7 +272,12 @@ def inference_pipeline(request: PipelineRequest):
     if LOG_IO:
         for t in source_texts:
             logger.info("[NMT  INPUT] %s->%s  source=%r", src_code, tgt_code, t)
-    translations = _translate(source_texts, src_flores, tgt_flores)
+    try:
+        translations = _translate(source_texts, src_flores, tgt_flores)
+    except RuntimeError as exc:
+        if "Shutdown requested" in str(exc):
+            raise HTTPException(status_code=503, detail="Server is shutting down") from exc
+        raise
     if LOG_IO:
         for src, tgt in zip(source_texts, translations):
             logger.info("[NMT OUTPUT] %s->%s  source=%r  target=%r", src_code, tgt_code, src, tgt)

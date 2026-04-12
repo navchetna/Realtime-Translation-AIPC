@@ -25,6 +25,7 @@ function App() {
     'panel-2': '',
     'panel-3': '',
   });
+  const MAX_TRANSLATION_LINES = 40;
   const lastProcessedRequestKeyRef = useRef('');
 
   const addLog = useCallback((msg: string) => {
@@ -63,11 +64,12 @@ function App() {
   const isLoading = !vadReady && !vadError;
 
   useEffect(() => {
-    if (!latestTranscript.trim()) {
+    const sourceTranscript = latestTranscript.trim();
+    if (!sourceTranscript) {
       return;
     }
 
-    const requestKey = `${latestTranscript}::${Object.values(panelTargets).join('|')}`;
+    const requestKey = `${sourceTranscript}::${Object.values(panelTargets).join('|')}`;
     if (requestKey === lastProcessedRequestKeyRef.current) {
       return;
     }
@@ -78,40 +80,29 @@ function App() {
 
     const appendChunk = (existing: string, nextChunk: string) => {
       if (!nextChunk.trim()) return existing;
-      return existing ? `${existing}\n${nextChunk}` : nextChunk;
+      const combined = existing ? `${existing}\n${nextChunk}` : nextChunk;
+      const lines = combined.split('\n').filter(line => line.trim().length > 0);
+      return lines.slice(-MAX_TRANSLATION_LINES).join('\n');
     };
 
     const runBatchTranslation = async () => {
       setIsTranslating(true);
       const currentTargets = { ...panelTargets };
-      
-      console.log('[App] Starting batch translation for transcript:', latestTranscript);
-      console.log('[App] Current targets:', currentTargets);
-      console.log('[App] Target language names:', Object.values(currentTargets));
 
       const languageResults = await TranslationService.translateBatch(
-        latestTranscript,
+        sourceTranscript,
         Object.values(currentTargets),
         'hi'
       );
 
-      console.log('[App] Received languageResults:', languageResults);
-      console.log('[App] panelTargets:', currentTargets);
-      console.log('[App] Will set translations:');
-      console.log('[App]   panel-1: languageResults[' + currentTargets['panel-1'] + '] = ' + languageResults[currentTargets['panel-1']]);
-      console.log('[App]   panel-2: languageResults[' + currentTargets['panel-2'] + '] = ' + languageResults[currentTargets['panel-2']]);
-      console.log('[App]   panel-3: languageResults[' + currentTargets['panel-3'] + '] = ' + languageResults[currentTargets['panel-3']]);
-
       if (cancelled) return;
 
       setPanelTranslations(prev => {
-        const newState = {
+        return {
           'panel-1': appendChunk(prev['panel-1'], languageResults[currentTargets['panel-1']] || ''),
           'panel-2': appendChunk(prev['panel-2'], languageResults[currentTargets['panel-2']] || ''),
           'panel-3': appendChunk(prev['panel-3'], languageResults[currentTargets['panel-3']] || ''),
         };
-        console.log('[App] New panelTranslations state:', newState);
-        return newState;
       });
       setIsTranslating(false);
     };

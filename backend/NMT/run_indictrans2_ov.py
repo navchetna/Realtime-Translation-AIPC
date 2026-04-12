@@ -59,6 +59,7 @@ class IndicTrans2OpenVINO:
         self.device = device
         self.max_length = max_length
         self.num_beams = num_beams
+        self._stop_requested = False
         
         try:
             import openvino as ov
@@ -96,6 +97,14 @@ class IndicTrans2OpenVINO:
         self._load_models()
         
         logger.info(f"IndicTrans2OpenVINO initialized with device: {device}")
+
+    def request_stop(self):
+        """Request cooperative shutdown for in-flight generation loops."""
+        self._stop_requested = True
+
+    def _raise_if_stop_requested(self):
+        if self._stop_requested:
+            raise RuntimeError("Shutdown requested")
     
     def _load_config(self) -> dict:
         """Load model configuration."""
@@ -186,12 +195,22 @@ class IndicTrans2OpenVINO:
         attention_mask: np.ndarray
     ) -> np.ndarray:
         """Run encoder to get encoder hidden states."""
+        infer_request = self.encode_async(input_ids, attention_mask)
+        infer_request.wait()
+        return np.array(infer_request.get_output_tensor(0).data, copy=True)
+
+    def encode_async(
+        self,
+        input_ids: np.ndarray,
+        attention_mask: np.ndarray
+    ):
+        """Start encoder inference asynchronously and return the infer request."""
         infer_request = self.encoder.create_infer_request()
-        infer_request.infer({
+        infer_request.start_async({
             "input_ids": input_ids,
             "attention_mask": attention_mask
         })
-        return np.array(infer_request.get_output_tensor(0).data, copy=True)
+        return infer_request
     
     def decode_prefill(
         self,
@@ -200,12 +219,12 @@ class IndicTrans2OpenVINO:
         encoder_attention_mask: np.ndarray
     ) -> Tuple[np.ndarray, List[Tuple[np.ndarray, ...]]]:
         """Run decoder prefill step (first token generation)."""
-        infer_request = self.decoder_prefill.create_infer_request()
-        infer_request.infer([
+        infer_request = self.decode_prefill_async(
             decoder_input_ids,
             encoder_hidden_states,
             encoder_attention_mask
-        ])
+        )
+        infer_request.wait()
 
         num_outputs = len(self.decoder_prefill.outputs)
         results = [np.array(infer_request.get_output_tensor(i).data, copy=True) for i in range(num_outputs)]
@@ -223,6 +242,21 @@ class IndicTrans2OpenVINO:
             ))
         
         return logits, past_key_values
+
+    def decode_prefill_async(
+        self,
+        decoder_input_ids: np.ndarray,
+        encoder_hidden_states: np.ndarray,
+        encoder_attention_mask: np.ndarray
+    ):
+        """Start decoder prefill asynchronously and return the infer request."""
+        infer_request = self.decoder_prefill.create_infer_request()
+        infer_request.start_async([
+            decoder_input_ids,
+            encoder_hidden_states,
+            encoder_attention_mask
+        ])
+        return infer_request
     
     def decode_step(
         self,
@@ -232,17 +266,13 @@ class IndicTrans2OpenVINO:
         past_key_values: List[Tuple[np.ndarray, ...]]
     ) -> Tuple[np.ndarray, List[Tuple[np.ndarray, ...]]]:
         """Run single decoder step with KV-cache for entire batch."""
-        inputs = [
+        infer_request = self.decode_step_async(
             decoder_input_ids,
             encoder_hidden_states,
             encoder_attention_mask,
-        ]
-        
-        for self_k, self_v, cross_k, cross_v in past_key_values:
-            inputs.extend([self_k, self_v, cross_k, cross_v])
-        
-        infer_request = self.decoder_decode.create_infer_request()
-        infer_request.infer(inputs)
+            past_key_values
+        )
+        infer_request.wait()
 
         num_outputs = len(self.decoder_decode.outputs)
         results = [np.array(infer_request.get_output_tensor(i).data, copy=True) for i in range(num_outputs)]
@@ -259,6 +289,27 @@ class IndicTrans2OpenVINO:
             ))
         
         return logits, new_past_key_values
+
+    def decode_step_async(
+        self,
+        decoder_input_ids: np.ndarray,
+        encoder_hidden_states: np.ndarray,
+        encoder_attention_mask: np.ndarray,
+        past_key_values: List[Tuple[np.ndarray, ...]]
+    ):
+        """Start decoder step asynchronously and return the infer request."""
+        inputs = [
+            decoder_input_ids,
+            encoder_hidden_states,
+            encoder_attention_mask,
+        ]
+
+        for self_k, self_v, cross_k, cross_v in past_key_values:
+            inputs.extend([self_k, self_v, cross_k, cross_v])
+
+        infer_request = self.decoder_decode.create_infer_request()
+        infer_request.start_async(inputs)
+        return infer_request
     
     def generate(
         self,
@@ -273,6 +324,8 @@ class IndicTrans2OpenVINO:
         """
         max_length = max_length or self.max_length
         num_beams = num_beams or self.num_beams
+
+        self._raise_if_stop_requested()
         
         batch_size = input_ids.shape[0]
         
@@ -285,6 +338,8 @@ class IndicTrans2OpenVINO:
             encoder_hidden_states,
             attention_mask
         )
+
+        self._raise_if_stop_requested()
         
         next_token_logits = logits[:, -1, :]
         next_tokens = np.argmax(next_token_logits, axis=-1, keepdims=True)
@@ -295,6 +350,7 @@ class IndicTrans2OpenVINO:
         generated_tokens = [next_tokens]
         
         for step in range(max_length - 1):
+            self._raise_if_stop_requested()
             if not np.any(active_mask):
                 break
             
@@ -323,6 +379,7 @@ class IndicTrans2OpenVINO:
         max_length: Optional[int] = None
     ) -> List[str]:
         """Translate a list of sentences."""
+        self._raise_if_stop_requested()
         inputs = self.preprocess(sentences, src_lang, tgt_lang)
         
         output_ids = self.generate(
