@@ -1,0 +1,11 @@
+noisereduce
+indic_unified_parser
+espnet
+matplotlib
+pandas
+indic-num2words
+librosa
+numpy
+openvino==2025.4.1
+fastapi
+uvicorn

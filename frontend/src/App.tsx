@@ -5,8 +5,10 @@ import { TranslationPanel } from './components/TranslationPanel';
 import { VADController } from './components/VADController';
 import { Activity, MicOff, Loader2, AlertCircle, ChevronDown, ChevronUp, BarChart2 } from 'lucide-react';
 import { TranslationService } from './services/TranslationService';
+import { TtsService } from './services/TtsService';
 import type { NmtMetrics } from './services/TranslationService';
 import type { AsrMetrics } from './services/AsrService';
+import type { TtsMetrics } from './services/TtsService';
 
 function App() {
   const [vadReady, setVadReady] = useState(false);
@@ -20,7 +22,7 @@ function App() {
   const [panelTargets, setPanelTargets] = useState<Record<string, string>>({
     'panel-1': 'Hindi',
     'panel-2': 'Tamil',
-    'panel-3': 'Bengali',
+    'panel-3': 'Punjabi',
   });
   const [panelTranslations, setPanelTranslations] = useState<Record<string, string>>({
     'panel-1': '',
@@ -29,10 +31,13 @@ function App() {
   });
   const MAX_TRANSLATION_LINES = 40;
   const lastProcessedRequestKeyRef = useRef('');
+  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const activeAudioUrlRef = useRef<string | null>(null);
 
   const [showMetrics, setShowMetrics] = useState(false);
   const [lastAsrMetrics, setLastAsrMetrics] = useState<AsrMetrics | null>(null);
   const [lastNmtMetrics, setLastNmtMetrics] = useState<NmtMetrics | null>(null);
+  const [lastTtsMetrics, setLastTtsMetrics] = useState<TtsMetrics | null>(null);
 
   const addLog = useCallback((msg: string) => {
     if (msg.startsWith('✓')) {
@@ -68,6 +73,56 @@ function App() {
   };
 
   const isLoading = !vadReady && !vadError;
+
+  const playSentenceAudio = useCallback(async (sentence: string, targetLanguage: string) => {
+    const { audioBlob, metrics } = await TtsService.synthesize(sentence, targetLanguage);
+    if (metrics) setLastTtsMetrics(metrics);
+
+    if (activeAudioRef.current) {
+      activeAudioRef.current.pause();
+      activeAudioRef.current.currentTime = 0;
+      activeAudioRef.current = null;
+    }
+
+    if (activeAudioUrlRef.current) {
+      URL.revokeObjectURL(activeAudioUrlRef.current);
+      activeAudioUrlRef.current = null;
+    }
+
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(audioUrl);
+
+    activeAudioRef.current = audio;
+    activeAudioUrlRef.current = audioUrl;
+
+    const cleanup = () => {
+      if (activeAudioRef.current === audio) {
+        activeAudioRef.current = null;
+      }
+      if (activeAudioUrlRef.current === audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+        activeAudioUrlRef.current = null;
+      }
+    };
+
+    audio.onended = cleanup;
+    audio.onerror = cleanup;
+
+    await audio.play();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
+        activeAudioRef.current = null;
+      }
+      if (activeAudioUrlRef.current) {
+        URL.revokeObjectURL(activeAudioUrlRef.current);
+        activeAudioUrlRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const sourceTranscript = latestTranscript.trim();
@@ -217,7 +272,7 @@ function App() {
                 </div>
               </div>
             )}
-            {lastAsrMetrics && lastNmtMetrics && (
+            {lastAsrMetrics && (lastNmtMetrics || lastTtsMetrics) && (
               <div style={{ width: '1px', background: 'var(--glass-border)', alignSelf: 'stretch' }} />
             )}
             {lastNmtMetrics && (
@@ -237,7 +292,27 @@ function App() {
                 </div>
               </div>
             )}
-            {!lastAsrMetrics && !lastNmtMetrics && (
+            {lastNmtMetrics && lastTtsMetrics && (
+              <div style={{ width: '1px', background: 'var(--glass-border)', alignSelf: 'stretch' }} />
+            )}
+            {lastTtsMetrics && (
+              <div className={styles.metricsGroup}>
+                <span className={styles.metricsGroupLabel}>TTS</span>
+                <div className={styles.metricChip}>
+                  <span className={styles.metricChipLabel}>Latency</span>
+                  <span className={styles.metricChipValue}>{lastTtsMetrics.latency_ms} ms</span>
+                </div>
+                <div className={styles.metricChip}>
+                  <span className={styles.metricChipLabel}>Audio</span>
+                  <span className={styles.metricChipValue}>{lastTtsMetrics.audio_duration_s} s</span>
+                </div>
+                <div className={styles.metricChip}>
+                  <span className={styles.metricChipLabel}>RTF</span>
+                  <span className={styles.metricChipValue}>{lastTtsMetrics.rtf.toFixed(3)}</span>
+                </div>
+              </div>
+            )}
+            {!lastAsrMetrics && !lastNmtMetrics && !lastTtsMetrics && (
               <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Speak a phrase to see metrics.</span>
             )}
           </div>
@@ -268,6 +343,7 @@ function App() {
             translatedText={panelTranslations['panel-1']}
             isTranslating={isTranslating}
             onTargetLangChange={handlePanelLanguageChange}
+            onSpeakSentence={playSentenceAudio}
             variant="Color1"
           />
           <TranslationPanel
@@ -276,6 +352,7 @@ function App() {
             translatedText={panelTranslations['panel-2']}
             isTranslating={isTranslating}
             onTargetLangChange={handlePanelLanguageChange}
+            onSpeakSentence={playSentenceAudio}
             variant="Color2"
           />
           <TranslationPanel
@@ -284,6 +361,7 @@ function App() {
             translatedText={panelTranslations['panel-3']}
             isTranslating={isTranslating}
             onTargetLangChange={handlePanelLanguageChange}
+            onSpeakSentence={playSentenceAudio}
             variant="Color3"
           />
         </div>

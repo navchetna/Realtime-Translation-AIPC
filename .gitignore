@@ -46,6 +46,7 @@ openvino_models/
 *.pth
 *.safetensors
 *.onnx
+Fastspeech2_HS
 
 # OS / Editor Files
 .DS_Store
