@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useMicVAD } from '@ricky0123/vad-react';
 import { AsrService } from '../services/AsrService';
+import type { AsrMetrics } from '../services/AsrService';
 import { VAD_CONFIG } from '../config/vadConfig';
 
 interface Props {
@@ -8,6 +9,7 @@ interface Props {
   onTranscript: (text: string) => void;
   onLog: (msg: string) => void;
   onSpeakingChange: (speaking: boolean) => void;
+  onAsrMetrics?: (metrics: AsrMetrics) => void;
 }
 
 /**
@@ -15,7 +17,7 @@ interface Props {
  * This ensures useMicVAD (which loads a ~2MB ONNX model) never blocks the
  * initial page render.
  */
-export function VADController({ isListening, onTranscript, onLog, onSpeakingChange }: Props) {
+export function VADController({ isListening, onTranscript, onLog, onSpeakingChange, onAsrMetrics }: Props) {
   const prevLoading = useRef(true);
 
   const handleSpeechEnd = useCallback(async (audio: Float32Array) => {
@@ -23,12 +25,13 @@ export function VADController({ isListening, onTranscript, onLog, onSpeakingChan
     try {
       const exactPcmBytes = new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength).slice();
       const audioBlob = new Blob([exactPcmBytes], { type: 'application/octet-stream' });
-      const text = await AsrService.transcribeAudio(audioBlob);
+      const { text, metrics } = await AsrService.transcribeAudio(audioBlob);
       if (text?.trim()) onTranscript(text);
+      if (metrics && onAsrMetrics) onAsrMetrics(metrics);
     } catch (err) {
       console.error('ASR Error:', err);
     }
-  }, [onTranscript, onSpeakingChange]);
+  }, [onTranscript, onSpeakingChange, onAsrMetrics]);
 
   const vad = useMicVAD({
     // Preload model/runtime on mount but keep microphone off until user starts.

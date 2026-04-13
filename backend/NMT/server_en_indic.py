@@ -7,6 +7,7 @@ Port: 8003
 import logging
 import os
 import signal
+import time
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -96,6 +97,7 @@ class PipelineResponseItem(BaseModel):
     taskType: str
     config: dict | None = None
     output: list[OutputItem] | None = None
+    metrics: dict | None = None
 
 
 class PipelineResponse(BaseModel):
@@ -171,6 +173,7 @@ def _translate(sentences: list[str], src_lang: str, tgt_lang: str) -> list[str]:
 
 @app.post("/services/inference/pipeline", response_model=PipelineResponse)
 def inference_pipeline(request: PipelineRequest):
+    t_start = time.perf_counter()
     if not request.pipelineTasks:
         raise HTTPException(status_code=400, detail="pipelineTasks is empty")
 
@@ -237,6 +240,12 @@ def inference_pipeline(request: PipelineRequest):
                 outputs[idx] = OutputItem(source=src_text, target=tgt_text, targetLanguage=target_code)
 
         final_outputs = [o for o in outputs if o is not None]
+        latency_s = time.perf_counter() - t_start
+        total_words = sum(len(o.target.split()) for o in final_outputs)
+        tokens_per_sec = round(total_words / latency_s, 1) if latency_s > 0 else 0.0
+        if LOG_IO:
+            logger.info("[NMT METRICS] latency=%.1fms  approx_tokens=%d  tokens/s=%.1f",
+                        latency_s * 1000, total_words, tokens_per_sec)
         return PipelineResponse(
             pipelineResponse=[
                 PipelineResponseItem(
@@ -247,6 +256,11 @@ def inference_pipeline(request: PipelineRequest):
                         }
                     },
                     output=final_outputs,
+                    metrics={
+                        "latency_ms": round(latency_s * 1000, 1),
+                        "approx_tokens": total_words,
+                        "tokens_per_sec": tokens_per_sec,
+                    },
                 )
             ]
         )
@@ -287,6 +301,13 @@ def inference_pipeline(request: PipelineRequest):
         for src, tgt in zip(source_texts, translations)
     ]
 
+    latency_s = time.perf_counter() - t_start
+    total_words = sum(len(t.split()) for t in translations)
+    tokens_per_sec = round(total_words / latency_s, 1) if latency_s > 0 else 0.0
+    if LOG_IO:
+        logger.info("[NMT METRICS] latency=%.1fms  approx_tokens=%d  tokens/s=%.1f",
+                    latency_s * 1000, total_words, tokens_per_sec)
+
     return PipelineResponse(
         pipelineResponse=[
             PipelineResponseItem(
@@ -298,6 +319,11 @@ def inference_pipeline(request: PipelineRequest):
                     }
                 },
                 output=outputs,
+                metrics={
+                    "latency_ms": round(latency_s * 1000, 1),
+                    "approx_tokens": total_words,
+                    "tokens_per_sec": tokens_per_sec,
+                },
             )
         ]
     )

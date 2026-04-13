@@ -3,6 +3,7 @@ import logging
 import os
 import tempfile
 import io
+import time
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -59,6 +60,7 @@ class PipelineResponseItem(BaseModel):
     config: dict | None = None
     output: list[OutputItem] | None = None
     audio: list | None = None
+    metrics: dict | None = None
 
 
 class PipelineResponse(BaseModel):
@@ -164,6 +166,8 @@ def inference_pipeline(request: PipelineRequest):
     if not request.inputData.audio:
         raise HTTPException(status_code=400, detail="inputData.audio is empty")
 
+    t_start = time.perf_counter()
+    total_audio_duration_s = 0.0
     outputs = []
     for audio_input in request.inputData.audio:
         if audio_input.audioContent:
@@ -176,6 +180,7 @@ def inference_pipeline(request: PipelineRequest):
             raise HTTPException(status_code=400, detail="Each audio item must have audioContent or audioUri")
 
         audio_bytes_len = len(audio_bytes)
+        total_audio_duration_s += audio_bytes_len / (16000 * 4)
         if LOG_IO:
             logger.info(
                 "[ASR  INPUT] lang=%s  audio_bytes=%d  (~%.2f s at 16kHz float32)",
@@ -191,6 +196,14 @@ def inference_pipeline(request: PipelineRequest):
 
         outputs.append(OutputItem(source=text))
 
+    latency_s = time.perf_counter() - t_start
+    rtf = round(latency_s / total_audio_duration_s, 3) if total_audio_duration_s > 0 else 0.0
+    if LOG_IO:
+        logger.info(
+            "[ASR METRICS] latency=%.1fms  audio_dur=%.2fs  rtf=%.3f",
+            latency_s * 1000, total_audio_duration_s, rtf,
+        )
+
     return PipelineResponse(
         pipelineResponse=[
             PipelineResponseItem(
@@ -198,6 +211,11 @@ def inference_pipeline(request: PipelineRequest):
                 config=None,
                 output=outputs,
                 audio=None,
+                metrics={
+                    "latency_ms": round(latency_s * 1000, 1),
+                    "audio_duration_s": round(total_audio_duration_s, 2),
+                    "rtf": rtf,
+                },
             )
         ]
     )

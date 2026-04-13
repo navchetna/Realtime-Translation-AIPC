@@ -1,3 +1,14 @@
+export interface NmtMetrics {
+  latency_ms: number;
+  approx_tokens: number;
+  tokens_per_sec: number;
+}
+
+export interface TranslateBatchResult {
+  results: Record<string, string>;
+  metrics: NmtMetrics | null;
+}
+
 export class TranslationService {
   private static langMap: Record<string, string> = {
     "Hindi": "hi",
@@ -68,10 +79,10 @@ export class TranslationService {
     text: string,
     targetLanguages: string[],
     sourceLanguage: string = "hi"
-  ): Promise<Record<string, string>> {
+  ): Promise<TranslateBatchResult> {
     const normalizedSource = text.trim();
     if (!normalizedSource) {
-      return {};
+      return { results: {}, metrics: null };
     }
 
     const apiUrl = import.meta.env.VITE_NMT_API_URL || 'http://localhost:8004/services/inference/pipeline';
@@ -97,7 +108,7 @@ export class TranslationService {
       }));
 
     if (requests.length === 0) {
-      return passthrough;
+      return { results: passthrough, metrics: null };
     }
 
     try {
@@ -153,14 +164,17 @@ export class TranslationService {
         if (langName in passthrough) continue;
         result[langName] = byCode[code] || `[${langName}] ${normalizedSource}`;
       }
-      return result;
+      return {
+        results: result,
+        metrics: (data?.pipelineResponse?.[0]?.metrics as NmtMetrics) ?? null,
+      };
     } catch (e) {
       console.warn('NMT batch backend failed, falling back to mock responses.', e);
       const fallback: Record<string, string> = {};
       for (const lang of uniqueTargets) {
         fallback[lang] = `[${lang}] ${normalizedSource}`;
       }
-      return fallback;
+      return { results: fallback, metrics: null };
     }
   }
 }

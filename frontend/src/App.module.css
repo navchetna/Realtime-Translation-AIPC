@@ -333,3 +333,85 @@ option {
   line-height: 1.5;
   color: var(--text-main);
 }
+
+/* ── Metrics ─────────────────────────────────────────────── */
+
+.metricsToggleBtn {
+  font-size: 12px;
+  padding: 5px 13px;
+  border-radius: 20px;
+  border: 1px solid var(--glass-border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.metricsToggleBtn:hover {
+  color: var(--text-main);
+  border-color: var(--primary);
+}
+.metricsToggleBtnActive {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(0, 104, 181, 0.12);
+}
+
+.metricsBar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.metricsGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.metricsGroupLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  font-weight: 700;
+  padding-right: 10px;
+  border-right: 1px solid var(--glass-border);
+  white-space: nowrap;
+}
+
+.metricChip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 14px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  min-width: 76px;
+}
+
+.metricChipLabel {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+}
+
+.metricChipValue {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.3px;
+}

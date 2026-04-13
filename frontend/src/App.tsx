@@ -3,8 +3,10 @@ import styles from './App.module.css';
 import { Sidebar } from './components/Sidebar';
 import { TranslationPanel } from './components/TranslationPanel';
 import { VADController } from './components/VADController';
-import { Activity, MicOff, Loader2, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Activity, MicOff, Loader2, AlertCircle, ChevronDown, ChevronUp, BarChart2 } from 'lucide-react';
 import { TranslationService } from './services/TranslationService';
+import type { NmtMetrics } from './services/TranslationService';
+import type { AsrMetrics } from './services/AsrService';
 
 function App() {
   const [vadReady, setVadReady] = useState(false);
@@ -27,6 +29,10 @@ function App() {
   });
   const MAX_TRANSLATION_LINES = 40;
   const lastProcessedRequestKeyRef = useRef('');
+
+  const [showMetrics, setShowMetrics] = useState(false);
+  const [lastAsrMetrics, setLastAsrMetrics] = useState<AsrMetrics | null>(null);
+  const [lastNmtMetrics, setLastNmtMetrics] = useState<NmtMetrics | null>(null);
 
   const addLog = useCallback((msg: string) => {
     if (msg.startsWith('✓')) {
@@ -89,11 +95,13 @@ function App() {
       setIsTranslating(true);
       const currentTargets = { ...panelTargets };
 
-      const languageResults = await TranslationService.translateBatch(
+      const { results: languageResults, metrics: nmtMetrics } = await TranslationService.translateBatch(
         sourceTranscript,
         Object.values(currentTargets),
         'hi'
       );
+
+      if (nmtMetrics) setLastNmtMetrics(nmtMetrics);
 
       if (cancelled) return;
 
@@ -134,51 +142,106 @@ function App() {
             <h1>Real-time Multi-lingual Translation</h1>
           </div>
 
-          <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-            {vadError ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger)' }}>
-                <AlertCircle size={18} /> VAD failed to load
-              </div>
-            ) : (
-              <button
-                className={styles.button}
-                style={{
-                  background: isListening ? 'var(--danger)' : 'var(--primary)',
-                  padding: '12px 24px',
-                  borderRadius: '30px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  opacity: isLoading ? 0.7 : 1,
-                  cursor: isLoading ? 'not-allowed' : 'pointer',
-                }}
-                onClick={handleStartListening}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <><Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> Loading VAD...</>
-                ) : isListening ? (
-                  <><MicOff size={18} /> Stop Listening</>
-                ) : (
-                  <><Activity size={18} /> Start Listening</>
-                )}
-              </button>
-            )}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+              {vadError ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger)' }}>
+                  <AlertCircle size={18} /> VAD failed to load
+                </div>
+              ) : (
+                <button
+                  className={styles.button}
+                  style={{
+                    background: isListening ? 'var(--danger)' : 'var(--primary)',
+                    padding: '12px 24px',
+                    borderRadius: '30px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    opacity: isLoading ? 0.7 : 1,
+                    cursor: isLoading ? 'not-allowed' : 'pointer',
+                  }}
+                  onClick={handleStartListening}
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <><Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> Loading VAD...</>
+                  ) : isListening ? (
+                    <><MicOff size={18} /> Stop Listening</>
+                  ) : (
+                    <><Activity size={18} /> Start Listening</>
+                  )}
+                </button>
+              )}
 
-            {isListening && !isLoading && isSpeaking && (
-              <div className={styles.liveIndicator}>
-                <div className={styles.liveDot} />
-                Capturing Speech...
-              </div>
-            )}
-            {isListening && !isLoading && !isSpeaking && (
-              <div className={styles.liveIndicator} style={{ background: 'rgba(245, 158, 11, 0.1)', color: 'var(--warning)' }}>
-                <div className={styles.liveDot} style={{ background: 'var(--warning)', animation: 'none' }} />
-                Listening...
-              </div>
-            )}
+              {isListening && !isLoading && isSpeaking && (
+                <div className={styles.liveIndicator}>
+                  <div className={styles.liveDot} />
+                  Capturing Speech...
+                </div>
+              )}
+              {isListening && !isLoading && !isSpeaking && (
+                <div className={styles.liveIndicator} style={{ background: 'rgba(245, 158, 11, 0.1)', color: 'var(--warning)' }}>
+                  <div className={styles.liveDot} style={{ background: 'var(--warning)', animation: 'none' }} />
+                  Listening...
+                </div>
+              )}
+            </div>
+
+            <button
+              className={`${styles.metricsToggleBtn}${showMetrics ? ` ${styles.metricsToggleBtnActive}` : ''}`}
+              onClick={() => setShowMetrics(p => !p)}
+            >
+              <BarChart2 size={13} />
+              {showMetrics ? 'Hide Metrics' : 'Show Metrics'}
+            </button>
           </div>
         </header>
+
+        {showMetrics && (
+          <div className={styles.metricsBar}>
+            {lastAsrMetrics && (
+              <div className={styles.metricsGroup}>
+                <span className={styles.metricsGroupLabel}>ASR</span>
+                <div className={styles.metricChip}>
+                  <span className={styles.metricChipLabel}>Latency</span>
+                  <span className={styles.metricChipValue}>{lastAsrMetrics.latency_ms} ms</span>
+                </div>
+                <div className={styles.metricChip}>
+                  <span className={styles.metricChipLabel}>Audio</span>
+                  <span className={styles.metricChipValue}>{lastAsrMetrics.audio_duration_s} s</span>
+                </div>
+                <div className={styles.metricChip}>
+                  <span className={styles.metricChipLabel}>RTF</span>
+                  <span className={styles.metricChipValue}>{lastAsrMetrics.rtf.toFixed(3)}</span>
+                </div>
+              </div>
+            )}
+            {lastAsrMetrics && lastNmtMetrics && (
+              <div style={{ width: '1px', background: 'var(--glass-border)', alignSelf: 'stretch' }} />
+            )}
+            {lastNmtMetrics && (
+              <div className={styles.metricsGroup}>
+                <span className={styles.metricsGroupLabel}>NMT</span>
+                <div className={styles.metricChip}>
+                  <span className={styles.metricChipLabel}>Latency</span>
+                  <span className={styles.metricChipValue}>{lastNmtMetrics.latency_ms} ms</span>
+                </div>
+                <div className={styles.metricChip}>
+                  <span className={styles.metricChipLabel}>Tokens/s</span>
+                  <span className={styles.metricChipValue}>{lastNmtMetrics.tokens_per_sec.toFixed(1)}</span>
+                </div>
+                <div className={styles.metricChip}>
+                  <span className={styles.metricChipLabel}>~Tokens</span>
+                  <span className={styles.metricChipValue}>{lastNmtMetrics.approx_tokens}</span>
+                </div>
+              </div>
+            )}
+            {!lastAsrMetrics && !lastNmtMetrics && (
+              <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Speak a phrase to see metrics.</span>
+            )}
+          </div>
+        )}
 
         <div className={`${styles.asrPanel} ${isAudioPanelCollapsed ? styles.asrPanelCollapsed : ''}`} style={{ marginBottom: '24px', marginTop: 0 }}>
           <div className={styles.asrHeader}>
@@ -231,6 +294,7 @@ function App() {
         onTranscript={handleTranscript}
         onLog={addLog}
         onSpeakingChange={setIsSpeaking}
+        onAsrMetrics={setLastAsrMetrics}
       />
     </div>
   );
