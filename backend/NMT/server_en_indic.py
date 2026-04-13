@@ -147,12 +147,14 @@ def load_model():
     model_dir = os.getenv("NMT_MODEL_DIR", "./openvino_models/indictrans2-en-indic-1B-fp16/optimum")
     model_name = os.getenv("NMT_MODEL_NAME", "ai4bharat/indictrans2-en-indic-1B")
     warmup_iters = int(os.getenv("NMT_WARMUP", "3"))
+    max_length = int(os.getenv("NMT_MAX_LENGTH", "128"))
 
     logger.info(f"Loading EN->Indic NMT model from '{model_dir}' on {device}...")
     translator = IndicTrans2OpenVINO(
         model_dir=model_dir,
         device=device,
         model_name=model_name,
+        max_length=max_length,
     )
 
     if warmup_iters > 0:

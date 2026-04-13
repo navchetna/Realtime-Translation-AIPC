@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react';
 import styles from '../App.module.css';
 
 interface Props {
@@ -23,6 +24,14 @@ const LANGUAGES = [
 ];
 
 export const TranslationPanel: React.FC<Props> = ({ id, targetLang, translatedText, isTranslating, onTargetLangChange, variant }) => {
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+    }
+  }, [translatedText]);
+
   return (
     <div className={`${styles.panel} ${variant ? styles['panel' + variant] : ''}`} key={id}>
       <div className={styles.panelHeader}>
@@ -40,7 +49,7 @@ export const TranslationPanel: React.FC<Props> = ({ id, targetLang, translatedTe
           </select>
         </div>
       </div>
-      <div className={styles.panelBody}>
+      <div className={styles.panelBody} ref={bodyRef}>
         {translatedText ? (
           <p style={{ whiteSpace: 'pre-wrap' }}>{translatedText}</p>
         ) : (

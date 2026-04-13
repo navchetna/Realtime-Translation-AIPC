@@ -154,12 +154,14 @@ def load_model():
     model_dir = os.getenv("NMT_MODEL_DIR", "./openvino_models/indictrans2-indic-indic-1B-fp16/optimum")
     model_name = os.getenv("NMT_MODEL_NAME", "ai4bharat/indictrans2-indic-indic-1B")
     warmup_iters = int(os.getenv("NMT_WARMUP", "3"))
+    max_length = int(os.getenv("NMT_MAX_LENGTH", "128"))
 
     logger.info(f"Loading Indic->Indic NMT model from '{model_dir}' on {device}...")
     translator = IndicTrans2OpenVINO(
         model_dir=model_dir,
         device=device,
         model_name=model_name,
+        max_length=max_length,
     )
 
     if warmup_iters > 0:
@@ -180,7 +182,6 @@ def _translate(sentences: list[str], src_lang: str, tgt_lang: str) -> list[str]:
 
 @app.post("/services/inference/pipeline", response_model=PipelineResponse)
 def inference_pipeline(request: PipelineRequest):
-    t_start = time.perf_counter()
     if not request.pipelineTasks:
         raise HTTPException(status_code=400, detail="pipelineTasks is empty")
 
@@ -224,6 +225,7 @@ def inference_pipeline(request: PipelineRequest):
 
             grouped.setdefault(tgt_code, []).append((i, item.source, tgt_flores))
 
+        t_start = time.perf_counter()
         for target_code, rows in grouped.items():
             texts = [row[1] for row in rows]
             tgt_flores = rows[0][2]
