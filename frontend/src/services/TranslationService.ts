@@ -11,6 +11,7 @@ export interface TranslateBatchResult {
 
 export class TranslationService {
   private static langMap: Record<string, string> = {
+    "English": "en",
     "Hindi": "hi",
     "Bengali": "bn",
     "Tamil": "ta",
@@ -26,8 +27,12 @@ export class TranslationService {
   /**
    * Sends a transcript to the NMT (Machine Translation) backend to get a translated text.
    */
-  static async translateText(text: string, targetLanguage: string, sourceLanguage: string = "hi"): Promise<string> {
-    const apiUrl = import.meta.env.VITE_NMT_API_URL || 'http://localhost:8004/services/inference/pipeline';
+  static async translateText(text: string, targetLanguage: string, sourceLanguage: string = "en"): Promise<string> {
+    // Route to appropriate server: en→indic on 8003, indic→indic on 8004
+    let apiUrl = import.meta.env.VITE_NMT_API_URL;
+    if (!apiUrl) {
+      apiUrl = sourceLanguage === "en" ? 'http://localhost:8003/services/inference/pipeline' : 'http://localhost:8004/services/inference/pipeline';
+    }
     const tgtCode = this.langMap[targetLanguage] || "hi";
     
     // NMT backend requires source and target to differ.
@@ -78,14 +83,18 @@ export class TranslationService {
   static async translateBatch(
     text: string,
     targetLanguages: string[],
-    sourceLanguage: string = "hi"
+    sourceLanguage: string = "en"
   ): Promise<TranslateBatchResult> {
     const normalizedSource = text.trim();
     if (!normalizedSource) {
       return { results: {}, metrics: null };
     }
 
-    const apiUrl = import.meta.env.VITE_NMT_API_URL || 'http://localhost:8004/services/inference/pipeline';
+    // Route to appropriate server: en→indic on 8003, indic→indic on 8004
+    let apiUrl = import.meta.env.VITE_NMT_API_URL;
+    if (!apiUrl) {
+      apiUrl = sourceLanguage === "en" ? 'http://localhost:8003/services/inference/pipeline' : 'http://localhost:8004/services/inference/pipeline';
+    }
 
     const uniqueTargets = Array.from(new Set(targetLanguages));
     const languageCodes = uniqueTargets.map((langName) => ({

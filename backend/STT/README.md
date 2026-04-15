@@ -1,33 +1,37 @@
-# IndicConformer Speech to Text Service
-
+# Whisper Speech to Text Service (OpenVINO GenAI)
 
 ## Setup
 
 1. Create environment and install dependencies:
-    ```bash
-    uv venv --python=3.10
-    .venv\Scripts\activate
-    uv pip install -r requirements.txt
-    ```
-2. Export the huggingface token to download the model:
-    ```bash
-    set HF_TOKEN=YOUR_TOKEN_HERE
-    ```
-3. Donwload the model
-    ```bash
-    hf download ai4bharat/indic-conformer-600m-multilingual --local-dir conformer_model
-    ```
-4. Convert the model to openvino format:
-    ```bash
-    python convert_to_openvino_fp16.py
-    ```
-5. Run the server:
-    ```bash
-    start_server.bat
-    ```
-    
-## Inference
+   ```bash
+   uv venv --python=3.10
+   .venv\Scripts\activate
+   uv pip install -r requirements.txt
+   ```
 
-1. Run the scrpit to test the inference:
-```python test_real_audio.py AUDIO_FILE_PATH hi CPU
-```
+2. Download the quantized model:
+    ```bash
+    hf download OpenVINO/distil-whisper-large-v3-int4-ov --local-dir distil_whisper_large
+    ```
+
+3. Choose runtime variables (optional):
+   ```bash
+   set ASR_DEVICE=CPU
+   set ASR_MODEL_NAME=distil_whisper_large
+   ```
+
+4. Run the server:
+   ```bash
+   start_server.bat
+   ```
+
+## API
+
+- Endpoint: `POST /services/inference/pipeline`
+- Task type: `asr`
+- Input: base64 audio bytes (`inputData.audio[].audioContent`) or URL (`audioUri`)
+- Output: `pipelineResponse[0].output[].source`
+
+## Health
+
+- Endpoint: `GET /health`

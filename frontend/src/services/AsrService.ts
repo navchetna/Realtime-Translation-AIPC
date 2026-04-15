@@ -34,6 +34,7 @@ export class AsrService {
               taskType: 'asr',
               config: {
                 language: { sourceLanguage },
+                samplingRate: 16000,
                 postProcessors: ['itn', 'punctuation']
               }
             }

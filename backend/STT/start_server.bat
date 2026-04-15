@@ -1,8 +1,7 @@
 @echo off
 set PYTHONUTF8=1
-set ASR_DEVICE=CPU
-set ASR_MODEL_DIR=openvino_models
-set ASR_CONFIG_PATH=conformer_model
+set ASR_DEVICE=GPU
+set ASR_MODEL_NAME=distil_whisper_large
 call .venv\Scripts\activate
 uvicorn server:app --host 0.0.0.0 --port 8002
 pause

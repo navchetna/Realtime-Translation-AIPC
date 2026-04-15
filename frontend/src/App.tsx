@@ -20,7 +20,7 @@ function App() {
   const [isTranslating, setIsTranslating] = useState(false);
   const [isAudioPanelCollapsed, setIsAudioPanelCollapsed] = useState(false);
   const [panelTargets, setPanelTargets] = useState<Record<string, string>>({
-    'panel-1': 'Hindi',
+    'panel-1': 'English',
     'panel-2': 'Tamil',
     'panel-3': 'Punjabi',
   });
@@ -153,7 +153,7 @@ function App() {
       const { results: languageResults, metrics: nmtMetrics } = await TranslationService.translateBatch(
         sourceTranscript,
         Object.values(currentTargets),
-        'hi'
+        'en'
       );
 
       if (nmtMetrics) setLastNmtMetrics(nmtMetrics);

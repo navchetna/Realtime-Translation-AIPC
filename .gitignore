@@ -39,6 +39,7 @@ venv.bak/
 .vite
 
 # OpenVINO & Machine Learning Models
+distil_whisper_large/
 openvino_models/
 *.bin
 *.xml

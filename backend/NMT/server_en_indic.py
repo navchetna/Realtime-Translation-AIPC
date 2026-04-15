@@ -106,7 +106,17 @@ class PipelineResponse(BaseModel):
 
 # --- App setup ---
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(title="IndicTrans2 EN->Indic NMT API (Bhashini-compatible)")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 translator = None
 _previous_sigint_handler = None
@@ -175,7 +185,6 @@ def _translate(sentences: list[str], src_lang: str, tgt_lang: str) -> list[str]:
 
 @app.post("/services/inference/pipeline", response_model=PipelineResponse)
 def inference_pipeline(request: PipelineRequest):
-    t_start = time.perf_counter()
     if not request.pipelineTasks:
         raise HTTPException(status_code=400, detail="pipelineTasks is empty")
 
@@ -223,6 +232,7 @@ def inference_pipeline(request: PipelineRequest):
 
             grouped.setdefault(tgt_code, []).append((i, item.source, tgt_flores))
 
+        t_start = time.perf_counter()
         for target_code, rows in grouped.items():
             texts = [row[1] for row in rows]
             tgt_flores = rows[0][2]
@@ -284,6 +294,7 @@ def inference_pipeline(request: PipelineRequest):
     if not request.inputData.input:
         raise HTTPException(status_code=400, detail="inputData.input is empty")
 
+    t_start = time.perf_counter()
     source_texts = [item.source for item in request.inputData.input]
     if LOG_IO:
         for t in source_texts:

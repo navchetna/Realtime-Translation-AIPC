@@ -12,6 +12,7 @@ interface Props {
 }
 
 const LANGUAGES = [
+  "English",
   "Hindi", 
   "Bengali", 
   "Tamil", 
