@@ -4,6 +4,7 @@ import io
 import logging
 import os
 import time
+from uuid import uuid4
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
@@ -16,6 +17,9 @@ from utilities import SAMPLING_RATE, SUPPORTED_OUTPUT_LANGS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Set LOG_IO=0 to suppress per-request TTS logging. Default: enabled.
+LOG_IO = os.getenv("LOG_IO", "1").strip().lower() not in ("0", "false", "no", "off")
 
 # --- Language code mapping (Bhashini 2-letter <-> full name) ---
 
@@ -158,6 +162,53 @@ def _synthesize(tts_app: Text2SpeechApp, text: str, gender: str, requested_sr: i
     return base64.b64encode(wav_bytes).decode("ascii"), audio_duration_s
 
 
+def _log_tts_input(req_id: str, endpoint: str, lang_code: str, gender: str, sampling_rate: int, text: str):
+    if not LOG_IO:
+        return
+
+    logger.info(
+        "[TTS  INPUT] req=%s endpoint=%s lang=%s gender=%s sr=%d chars=%d words=%d text=%r",
+        req_id,
+        endpoint,
+        lang_code,
+        gender,
+        sampling_rate,
+        len(text),
+        len(text.split()),
+        text,
+    )
+
+
+def _log_tts_metrics(
+    req_id: str,
+    endpoint: str,
+    lang_code: str,
+    gender: str,
+    sampling_rate: int,
+    item_count: int,
+    latency_ms: float,
+    audio_duration_s: float,
+    rtf: float,
+    total_base64_chars: int,
+):
+    if not LOG_IO:
+        return
+
+    logger.info(
+        "[TTS METRICS] req=%s endpoint=%s lang=%s gender=%s sr=%d items=%d latency=%.2fms audio=%.3fs rtf=%.4f b64_chars=%d",
+        req_id,
+        endpoint,
+        lang_code,
+        gender,
+        sampling_rate,
+        item_count,
+        latency_ms,
+        audio_duration_s,
+        rtf,
+        total_base64_chars,
+    )
+
+
 def _resolve_tts_engine(lang_code: str, gender: str) -> tuple[str, Text2SpeechApp, str]:
     lang_code = lang_code.lower()
     lang_name = LANG_CODE_TO_NAME.get(lang_code)
@@ -181,6 +232,7 @@ def _resolve_tts_engine(lang_code: str, gender: str) -> tuple[str, Text2SpeechAp
 
 @app.post("/services/inference/pipeline", response_model=PipelineResponse)
 async def inference_pipeline(request: PipelineRequest):
+    req_id = uuid4().hex[:8]
     t_start = time.perf_counter()
     if not request.pipelineTasks:
         raise HTTPException(status_code=400, detail="pipelineTasks is empty")
@@ -203,13 +255,28 @@ async def inference_pipeline(request: PipelineRequest):
     # Process all input texts and collect audio
     audio_items = []
     total_audio_duration_s = 0.0
+    total_base64_chars = 0
     for item in request.inputData.input:
+        _log_tts_input(req_id, "pipeline", lang_code, gender, requested_sr, item.source)
         b64_audio, audio_duration_s = await asyncio.to_thread(_synthesize, tts_app, item.source, gender, requested_sr)
         total_audio_duration_s += audio_duration_s
+        total_base64_chars += len(b64_audio)
         audio_items.append(AudioItem(audioContent=b64_audio, audioUri=None))
 
     latency_ms = round((time.perf_counter() - t_start) * 1000, 2)
     rtf = round((latency_ms / 1000) / total_audio_duration_s, 4) if total_audio_duration_s > 0 else 0.0
+    _log_tts_metrics(
+        req_id=req_id,
+        endpoint="pipeline",
+        lang_code=lang_code,
+        gender=gender,
+        sampling_rate=requested_sr,
+        item_count=len(audio_items),
+        latency_ms=latency_ms,
+        audio_duration_s=round(total_audio_duration_s, 3),
+        rtf=rtf,
+        total_base64_chars=total_base64_chars,
+    )
 
     response = PipelineResponse(
         pipelineResponse=[
@@ -237,6 +304,7 @@ async def inference_pipeline(request: PipelineRequest):
 @app.post("/tts")
 async def tts_compat(request: SimpleTtsRequest):
     """Compatibility endpoint for clients calling /tts on port 5000."""
+    req_id = uuid4().hex[:8]
     sentence = request.text.strip()
     if not sentence:
         raise HTTPException(status_code=400, detail="text is empty")
@@ -245,9 +313,22 @@ async def tts_compat(request: SimpleTtsRequest):
     _, tts_app, gender = _resolve_tts_engine(lang_code, request.gender)
 
     t_start = time.perf_counter()
+    _log_tts_input(req_id, "tts", lang_code, gender, request.samplingRate, sentence)
     b64_audio, audio_duration_s = await asyncio.to_thread(_synthesize, tts_app, sentence, gender, request.samplingRate)
     latency_ms = round((time.perf_counter() - t_start) * 1000, 2)
     rtf = round((latency_ms / 1000) / audio_duration_s, 4) if audio_duration_s > 0 else 0.0
+    _log_tts_metrics(
+        req_id=req_id,
+        endpoint="tts",
+        lang_code=lang_code,
+        gender=gender,
+        sampling_rate=request.samplingRate,
+        item_count=1,
+        latency_ms=latency_ms,
+        audio_duration_s=round(audio_duration_s, 3),
+        rtf=rtf,
+        total_base64_chars=len(b64_audio),
+    )
 
     return {
         "audioContent": b64_audio,

@@ -17,7 +17,7 @@
 
 4. Clone the repository:
     ```bash
-    git clone https://github.com/smtiitm/Fastspeech2_HS.git -b New-Models
+    git clone https://huggingface.co/Aditya02/FastSpeech2_HS
     ```
     ```
 5. Copy all the files from current directory to the cloned directory:

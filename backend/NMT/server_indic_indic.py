@@ -8,6 +8,7 @@ import logging
 import os
 import signal
 import time
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -154,7 +155,7 @@ def load_model():
     model_dir = os.getenv("NMT_MODEL_DIR", "./openvino_models/indictrans2-indic-indic-1B-fp16/optimum")
     model_name = os.getenv("NMT_MODEL_NAME", "ai4bharat/indictrans2-indic-indic-1B")
     warmup_iters = int(os.getenv("NMT_WARMUP", "3"))
-    max_length = int(os.getenv("NMT_MAX_LENGTH", "128"))
+    max_length = int(os.getenv("NMT_MAX_LENGTH", "64"))
 
     logger.info(f"Loading Indic->Indic NMT model from '{model_dir}' on {device}...")
     translator = IndicTrans2OpenVINO(
@@ -182,6 +183,8 @@ def _translate(sentences: list[str], src_lang: str, tgt_lang: str) -> list[str]:
 
 @app.post("/services/inference/pipeline", response_model=PipelineResponse)
 def inference_pipeline(request: PipelineRequest):
+    req_id = uuid4().hex[:8]
+
     if not request.pipelineTasks:
         raise HTTPException(status_code=400, detail="pipelineTasks is empty")
 
@@ -231,7 +234,7 @@ def inference_pipeline(request: PipelineRequest):
             tgt_flores = rows[0][2]
             if LOG_IO:
                 for t in texts:
-                    logger.info("[NMT  INPUT] %s->%s  source=%r", src_code, target_code, t)
+                    logger.info("[NMT  INPUT] req=%s %s->%s  source=%r", req_id, src_code, target_code, t)
             try:
                 translated = _translate(texts, src_flores, tgt_flores)
             except RuntimeError as exc:
@@ -241,7 +244,7 @@ def inference_pipeline(request: PipelineRequest):
             for row, tgt_text in zip(rows, translated):
                 idx, src_text, _ = row
                 if LOG_IO:
-                    logger.info("[NMT OUTPUT] %s->%s  source=%r  target=%r", src_code, target_code, src_text, tgt_text)
+                    logger.info("[NMT OUTPUT] req=%s %s->%s  source=%r  target=%r", req_id, src_code, target_code, src_text, tgt_text)
                 outputs[idx] = OutputItem(source=src_text, target=tgt_text, targetLanguage=target_code)
 
         final_outputs = [o for o in outputs if o is not None]
@@ -249,8 +252,8 @@ def inference_pipeline(request: PipelineRequest):
         total_words = sum(len(o.target.split()) for o in final_outputs)
         tokens_per_sec = round(total_words / latency_s, 1) if latency_s > 0 else 0.0
         if LOG_IO:
-            logger.info("[NMT METRICS] latency=%.1fms  approx_tokens=%d  tokens/s=%.1f",
-                        latency_s * 1000, total_words, tokens_per_sec)
+            logger.info("[NMT METRICS] req=%s latency=%.1fms  approx_tokens=%d  tokens/s=%.1f",
+                        req_id, latency_s * 1000, total_words, tokens_per_sec)
         return PipelineResponse(
             pipelineResponse=[
                 PipelineResponseItem(
@@ -288,10 +291,11 @@ def inference_pipeline(request: PipelineRequest):
     if not request.inputData.input:
         raise HTTPException(status_code=400, detail="inputData.input is empty")
 
+    t_start = time.perf_counter()
     source_texts = [item.source for item in request.inputData.input]
     if LOG_IO:
         for t in source_texts:
-            logger.info("[NMT  INPUT] %s->%s  source=%r", src_code, tgt_code, t)
+            logger.info("[NMT  INPUT] req=%s %s->%s  source=%r", req_id, src_code, tgt_code, t)
     try:
         translations = _translate(source_texts, src_flores, tgt_flores)
     except RuntimeError as exc:
@@ -300,7 +304,7 @@ def inference_pipeline(request: PipelineRequest):
         raise
     if LOG_IO:
         for src, tgt in zip(source_texts, translations):
-            logger.info("[NMT OUTPUT] %s->%s  source=%r  target=%r", src_code, tgt_code, src, tgt)
+            logger.info("[NMT OUTPUT] req=%s %s->%s  source=%r  target=%r", req_id, src_code, tgt_code, src, tgt)
 
     outputs = [
         OutputItem(source=src, target=tgt, targetLanguage=tgt_code)
@@ -311,8 +315,8 @@ def inference_pipeline(request: PipelineRequest):
     total_words = sum(len(t.split()) for t in translations)
     tokens_per_sec = round(total_words / latency_s, 1) if latency_s > 0 else 0.0
     if LOG_IO:
-        logger.info("[NMT METRICS] latency=%.1fms  approx_tokens=%d  tokens/s=%.1f",
-                    latency_s * 1000, total_words, tokens_per_sec)
+        logger.info("[NMT METRICS] req=%s latency=%.1fms  approx_tokens=%d  tokens/s=%.1f",
+                    req_id, latency_s * 1000, total_words, tokens_per_sec)
 
     return PipelineResponse(
         pipelineResponse=[

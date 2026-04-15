@@ -27,11 +27,11 @@ if errorlevel 1 exit /b 1
 call uv pip install --python .venv -r requirements.txt
 if errorlevel 1 exit /b 1
 
-set "TARGET_DIR=%SCRIPT_DIR%Fastspeech2_HS"
+set "TARGET_DIR=%SCRIPT_DIR%FastSpeech2_HS"
 
 echo [3/4] Downloading model repository...
 if exist "%TARGET_DIR%\.git" (
-    echo [INFO] Fastspeech2_HS already exists. Skipping clone.
+    echo [INFO] FastSpeech2_HS already exists. Skipping clone.
 ) else (
     if exist "%TARGET_DIR%" (
         echo [ERROR] %TARGET_DIR% exists but is not a git repository.
@@ -39,11 +39,11 @@ if exist "%TARGET_DIR%\.git" (
         exit /b 1
     )
 
-    call git clone https://huggingface.co/smtiitm/FastSpeech2_HS_latest_models Fastspeech2_HS
+    call git clone https://huggingface.co/Aditya02/FastSpeech2_HS
     if errorlevel 1 exit /b 1
 )
 
-echo [4/4] Copying local integration files into Fastspeech2_HS...
+echo [4/4] Copying local integration files into FastSpeech2_HS...
 copy /Y "%SCRIPT_DIR%utilities.py" "%TARGET_DIR%\" >nul
 if errorlevel 1 exit /b 1
 copy /Y "%SCRIPT_DIR%main_ov.py" "%TARGET_DIR%\" >nul
@@ -58,6 +58,6 @@ if errorlevel 1 exit /b 1
 echo.
 echo Setup complete.
 echo Activate the environment with: .venv\Scripts\activate
-echo Then go to: Fastspeech2_HS
+echo Then go to: FastSpeech2_HS
 
 endlocal

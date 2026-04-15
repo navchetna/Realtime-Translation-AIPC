@@ -83,7 +83,8 @@ export class TranslationService {
   static async translateBatch(
     text: string,
     targetLanguages: string[],
-    sourceLanguage: string = "en"
+    sourceLanguage: string = "en",
+    signal?: AbortSignal
   ): Promise<TranslateBatchResult> {
     const normalizedSource = text.trim();
     if (!normalizedSource) {
@@ -143,6 +144,7 @@ export class TranslationService {
         headers: {
           'Content-Type': 'application/json',
         },
+        signal,
         body: JSON.stringify(payload),
       });
 
@@ -178,6 +180,9 @@ export class TranslationService {
         metrics: (data?.pipelineResponse?.[0]?.metrics as NmtMetrics) ?? null,
       };
     } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        return { results: {}, metrics: null };
+      }
       console.warn('NMT batch backend failed, falling back to mock responses.', e);
       const fallback: Record<string, string> = {};
       for (const lang of uniqueTargets) {

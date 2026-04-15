@@ -3,26 +3,26 @@
 ## Setup
 
 1. Create environment and install dependencies:
-    ```bash
-    uv venv --python=3.12
-    .venv\Scripts\activate
-    
-    uv pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cpu
-    ```
+```bash
+uv venv --python=3.12
+.venv\Scripts\activate
+
+uv pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cpu
+```
 
 2. Install the indic tokenizer:
-``bash
+```bash
+uv pip install -r requirements.txt
 uv pip install indictranstoolkit
 ```
 
 3. Convert the model to OpenVINO IR format:
 ```bash
-python convert_indictrans2_ov.py  --model-name ai4bharat/indictrans2-en-indic-1B --output-dir ./openvino_models/indictrans2-en-indic-1B-fp32/ --device GPU --precision FP32
-
 python convert_indictrans2_ov.py   --model-name ai4bharat/indictrans2-indic-indic-1B --output-dir ./openvino_models/indictrans2-indic-indic-1B-fp16/ --device GPU
 ```
 
 OR
+
 ```bash
 python convert_indictrans2_ov.py   --model-name ai4bharat/indictrans2-indic-indic-1B --output-dir ./openvino_models/indictrans2-indic-indic-1B-fp16/ --device GPU --precision FP16
 ```
@@ -42,9 +42,9 @@ start_server_en_indic.bat
 start_server_indic_indic.bat
 ```
 
-test server
-
+## Testing
+```bash
 python test_nmt_en_indic.py
 test_nmt_indic_indic.py
-
+```
 

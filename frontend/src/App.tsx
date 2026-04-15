@@ -5,10 +5,19 @@ import { TranslationPanel } from './components/TranslationPanel';
 import { VADController } from './components/VADController';
 import { Activity, MicOff, Loader2, AlertCircle, ChevronDown, ChevronUp, BarChart2 } from 'lucide-react';
 import { TranslationService } from './services/TranslationService';
-import { TtsService } from './services/TtsService';
+import { TtsService, TTS_SUPPORTED_LANGUAGES } from './services/TtsService';
 import type { NmtMetrics } from './services/TranslationService';
 import type { AsrMetrics } from './services/AsrService';
 import type { TtsMetrics } from './services/TtsService';
+
+const STREAMABLE_LANGUAGES = [...TTS_SUPPORTED_LANGUAGES];
+const MAX_STREAM_AUDIO_QUEUE = 6;
+const STREAM_AUDIO_SETTINGS_KEY = 'realtime-translation:stream-audio-settings';
+
+type StreamAudioItem = {
+  text: string;
+  language: string;
+};
 
 function App() {
   const [vadReady, setVadReady] = useState(false);
@@ -16,7 +25,6 @@ function App() {
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
-  const [latestTranscript, setLatestTranscript] = useState('');
   const [isTranslating, setIsTranslating] = useState(false);
   const [isAudioPanelCollapsed, setIsAudioPanelCollapsed] = useState(false);
   const [panelTargets, setPanelTargets] = useState<Record<string, string>>({
@@ -29,15 +37,39 @@ function App() {
     'panel-2': '',
     'panel-3': '',
   });
+  const [isStreamAudioEnabled, setIsStreamAudioEnabled] = useState(false);
+  const [streamAudioLanguage, setStreamAudioLanguage] = useState<string>('Tamil');
+  const [streamAudioQueueSize, setStreamAudioQueueSize] = useState(0);
+  const [isStreamingAudioActive, setIsStreamingAudioActive] = useState(false);
+  const [hasUnsavedStreamAudioSettings, setHasUnsavedStreamAudioSettings] = useState(false);
+  const [streamAudioSettingsMessage, setStreamAudioSettingsMessage] = useState('');
   const MAX_TRANSLATION_LINES = 40;
-  const lastProcessedRequestKeyRef = useRef('');
+  const MAX_TRANSLATION_QUEUE = 8;
+  const translationQueueRef = useRef<string[]>([]);
+  const isTranslationQueueRunningRef = useRef(false);
+  const lastQueuedTranscriptRef = useRef('');
+  const panelTargetsRef = useRef(panelTargets);
+  const isStreamAudioEnabledRef = useRef(isStreamAudioEnabled);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const activeAudioUrlRef = useRef<string | null>(null);
+  const activeStreamAudioRef = useRef<HTMLAudioElement | null>(null);
+  const activeStreamAudioUrlRef = useRef<string | null>(null);
+  const streamAudioQueueRef = useRef<StreamAudioItem[]>([]);
+  const isStreamQueueRunningRef = useRef(false);
+  const processedStreamLineCountsRef = useRef<Record<string, number>>({});
 
   const [showMetrics, setShowMetrics] = useState(false);
   const [lastAsrMetrics, setLastAsrMetrics] = useState<AsrMetrics | null>(null);
   const [lastNmtMetrics, setLastNmtMetrics] = useState<NmtMetrics | null>(null);
   const [lastTtsMetrics, setLastTtsMetrics] = useState<TtsMetrics | null>(null);
+
+  const availableStreamAudioLanguages = Array.from(
+    new Set(
+      Object.values(panelTargets).filter((language) =>
+        STREAMABLE_LANGUAGES.includes(language as typeof STREAMABLE_LANGUAGES[number])
+      )
+    )
+  );
 
   const addLog = useCallback((msg: string) => {
     if (msg.startsWith('✓')) {
@@ -52,13 +84,134 @@ function App() {
     }
   }, []);
 
-  const handleTranscript = useCallback((text: string) => {
-    setLatestTranscript(text);
+  const appendChunk = useCallback((existing: string, nextChunk: string) => {
+    if (!nextChunk.trim()) return existing;
+    const combined = existing ? `${existing}\n${nextChunk}` : nextChunk;
+    const lines = combined.split('\n').filter(line => line.trim().length > 0);
+    return lines.slice(-MAX_TRANSLATION_LINES).join('\n');
   }, []);
+
+  const pumpTranslationQueue = useCallback(() => {
+    if (isTranslationQueueRunningRef.current) {
+      return;
+    }
+
+    const sourceTranscript = translationQueueRef.current.shift();
+    if (!sourceTranscript) {
+      setIsTranslating(false);
+      return;
+    }
+
+    isTranslationQueueRunningRef.current = true;
+    setIsTranslating(true);
+
+    const currentTargets = { ...panelTargetsRef.current };
+
+    TranslationService.translateBatch(
+      sourceTranscript,
+      Object.values(currentTargets),
+      'en'
+    )
+      .then(({ results: languageResults, metrics: nmtMetrics }) => {
+        if (nmtMetrics) setLastNmtMetrics(nmtMetrics);
+
+        setPanelTranslations(prev => {
+          return {
+            'panel-1': appendChunk(prev['panel-1'], languageResults[currentTargets['panel-1']] || ''),
+            'panel-2': appendChunk(prev['panel-2'], languageResults[currentTargets['panel-2']] || ''),
+            'panel-3': appendChunk(prev['panel-3'], languageResults[currentTargets['panel-3']] || ''),
+          };
+        });
+      })
+      .catch((error) => {
+        console.warn('Sequential NMT queue item failed:', error);
+      })
+      .finally(() => {
+        isTranslationQueueRunningRef.current = false;
+        pumpTranslationQueue();
+      });
+  }, [appendChunk]);
+
+  const handleTranscript = useCallback((text: string) => {
+    const normalized = text.trim();
+    if (!normalized) {
+      return;
+    }
+
+    if (normalized === lastQueuedTranscriptRef.current) {
+      return;
+    }
+    lastQueuedTranscriptRef.current = normalized;
+
+    translationQueueRef.current.push(normalized);
+    if (translationQueueRef.current.length > MAX_TRANSLATION_QUEUE) {
+      translationQueueRef.current = translationQueueRef.current.slice(-MAX_TRANSLATION_QUEUE);
+    }
+
+    pumpTranslationQueue();
+  }, [pumpTranslationQueue]);
 
   const handlePanelLanguageChange = useCallback((panelId: string, language: string) => {
     setPanelTargets(prev => ({ ...prev, [panelId]: language }));
     setPanelTranslations(prev => ({ ...prev, [panelId]: '' }));
+  }, []);
+
+  useEffect(() => {
+    panelTargetsRef.current = panelTargets;
+  }, [panelTargets]);
+
+  useEffect(() => {
+    isStreamAudioEnabledRef.current = isStreamAudioEnabled;
+  }, [isStreamAudioEnabled]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(STREAM_AUDIO_SETTINGS_KEY);
+      if (!raw) {
+        return;
+      }
+
+      const parsed = JSON.parse(raw) as {
+        isStreamAudioEnabled?: boolean;
+        streamAudioLanguage?: string;
+      };
+
+      if (typeof parsed.isStreamAudioEnabled === 'boolean') {
+        setIsStreamAudioEnabled(parsed.isStreamAudioEnabled);
+        isStreamAudioEnabledRef.current = parsed.isStreamAudioEnabled;
+      }
+
+      if (
+        typeof parsed.streamAudioLanguage === 'string' &&
+        STREAMABLE_LANGUAGES.includes(parsed.streamAudioLanguage as typeof STREAMABLE_LANGUAGES[number])
+      ) {
+        setStreamAudioLanguage(parsed.streamAudioLanguage);
+      }
+    } catch (error) {
+      console.warn('Failed to load stream audio settings:', error);
+    }
+  }, []);
+
+  const getStreamAudioSentences = useCallback((language: string, translations: Record<string, string>, targets: Record<string, string>) => {
+    const panelId = Object.keys(targets).find((key) => targets[key] === language);
+    if (!panelId) {
+      return { lineCount: 0, sentences: [] as string[] };
+    }
+
+    const lines = translations[panelId]
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const sentences = lines.flatMap((line) => {
+      const parts = line.match(/[^.!?।]+[.!?।]?/g);
+      return (parts && parts.length > 0 ? parts : [line]).map((part) => part.trim()).filter(Boolean);
+    });
+
+    return {
+      lineCount: lines.length,
+      sentences,
+    };
   }, []);
 
   const handleStartListening = () => {
@@ -111,6 +264,163 @@ function App() {
     await audio.play();
   }, []);
 
+  const stopStreamAudioPlayback = useCallback(() => {
+    streamAudioQueueRef.current = [];
+    setStreamAudioQueueSize(0);
+    setIsStreamingAudioActive(false);
+
+    if (activeStreamAudioRef.current) {
+      activeStreamAudioRef.current.pause();
+      activeStreamAudioRef.current.currentTime = 0;
+      activeStreamAudioRef.current = null;
+    }
+
+    if (activeStreamAudioUrlRef.current) {
+      URL.revokeObjectURL(activeStreamAudioUrlRef.current);
+      activeStreamAudioUrlRef.current = null;
+    }
+  }, []);
+
+  const pumpStreamAudioQueue = useCallback(async () => {
+    if (isStreamQueueRunningRef.current) {
+      return;
+    }
+
+    isStreamQueueRunningRef.current = true;
+
+    while (isStreamAudioEnabledRef.current && streamAudioQueueRef.current.length > 0) {
+      const nextItem = streamAudioQueueRef.current.shift();
+      setStreamAudioQueueSize(streamAudioQueueRef.current.length);
+
+      if (!nextItem) {
+        continue;
+      }
+
+      setIsStreamingAudioActive(true);
+
+      try {
+        const { audioBlob, metrics } = await TtsService.synthesize(nextItem.text, nextItem.language);
+        if (metrics) {
+          setLastTtsMetrics(metrics);
+        }
+
+        if (!isStreamAudioEnabledRef.current) {
+          break;
+        }
+
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
+        activeStreamAudioRef.current = audio;
+        activeStreamAudioUrlRef.current = audioUrl;
+
+        await new Promise<void>((resolve, reject) => {
+          const cleanup = () => {
+            audio.onended = null;
+            audio.onerror = null;
+            if (activeStreamAudioRef.current === audio) {
+              activeStreamAudioRef.current = null;
+            }
+            if (activeStreamAudioUrlRef.current === audioUrl) {
+              URL.revokeObjectURL(audioUrl);
+              activeStreamAudioUrlRef.current = null;
+            }
+          };
+
+          audio.onended = () => {
+            cleanup();
+            resolve();
+          };
+          audio.onerror = () => {
+            cleanup();
+            reject(new Error('Stream audio playback failed'));
+          };
+
+          void audio.play().catch((error) => {
+            cleanup();
+            reject(error);
+          });
+        });
+      } catch (error) {
+        console.warn('Stream audio generation failed:', error);
+      }
+    }
+
+    isStreamQueueRunningRef.current = false;
+    setIsStreamingAudioActive(false);
+  }, []);
+
+  const enqueueStreamAudio = useCallback((sentences: string[], language: string) => {
+    if (!isStreamAudioEnabledRef.current || !STREAMABLE_LANGUAGES.includes(language as typeof STREAMABLE_LANGUAGES[number])) {
+      return;
+    }
+
+    const nextItems = sentences
+      .map((sentence) => sentence.trim())
+      .filter(Boolean)
+      .map((text) => ({ text, language }));
+
+    if (nextItems.length === 0) {
+      return;
+    }
+
+    streamAudioQueueRef.current.push(...nextItems);
+    if (streamAudioQueueRef.current.length > MAX_STREAM_AUDIO_QUEUE) {
+      streamAudioQueueRef.current = streamAudioQueueRef.current.slice(-MAX_STREAM_AUDIO_QUEUE);
+    }
+    setStreamAudioQueueSize(streamAudioQueueRef.current.length);
+    void pumpStreamAudioQueue();
+  }, [pumpStreamAudioQueue]);
+
+  const queueCurrentStreamAudio = useCallback((language: string, translations: Record<string, string>, targets: Record<string, string>) => {
+    const { lineCount, sentences } = getStreamAudioSentences(language, translations, targets);
+    processedStreamLineCountsRef.current[language] = lineCount;
+    enqueueStreamAudio(sentences, language);
+  }, [enqueueStreamAudio, getStreamAudioSentences]);
+
+  const handleStreamAudioEnabledChange = useCallback((enabled: boolean) => {
+    setIsStreamAudioEnabled(enabled);
+    isStreamAudioEnabledRef.current = enabled;
+    setHasUnsavedStreamAudioSettings(true);
+    setStreamAudioSettingsMessage('');
+    if (!enabled) {
+      stopStreamAudioPlayback();
+      return;
+    }
+
+    queueCurrentStreamAudio(streamAudioLanguage, panelTranslations, panelTargets);
+  }, [panelTargets, panelTranslations, queueCurrentStreamAudio, stopStreamAudioPlayback, streamAudioLanguage]);
+
+  const handleStreamAudioLanguageChange = useCallback((language: string) => {
+    setStreamAudioLanguage(language);
+    setHasUnsavedStreamAudioSettings(true);
+    setStreamAudioSettingsMessage('');
+    stopStreamAudioPlayback();
+    if (isStreamAudioEnabledRef.current) {
+      queueCurrentStreamAudio(language, panelTranslations, panelTargets);
+      return;
+    }
+
+    const { lineCount } = getStreamAudioSentences(language, panelTranslations, panelTargets);
+    processedStreamLineCountsRef.current[language] = lineCount;
+  }, [getStreamAudioSentences, panelTargets, panelTranslations, queueCurrentStreamAudio, stopStreamAudioPlayback]);
+
+  const handleSaveStreamAudioSettings = useCallback(() => {
+    try {
+      window.localStorage.setItem(
+        STREAM_AUDIO_SETTINGS_KEY,
+        JSON.stringify({
+          isStreamAudioEnabled,
+          streamAudioLanguage,
+        })
+      );
+      setHasUnsavedStreamAudioSettings(false);
+      setStreamAudioSettingsMessage('Settings saved');
+    } catch (error) {
+      console.warn('Failed to save stream audio settings:', error);
+      setStreamAudioSettingsMessage('Save failed');
+    }
+  }, [isStreamAudioEnabled, streamAudioLanguage]);
+
   useEffect(() => {
     return () => {
       if (activeAudioRef.current) {
@@ -121,66 +431,98 @@ function App() {
         URL.revokeObjectURL(activeAudioUrlRef.current);
         activeAudioUrlRef.current = null;
       }
+
+      if (activeStreamAudioRef.current) {
+        activeStreamAudioRef.current.pause();
+        activeStreamAudioRef.current = null;
+      }
+
+      if (activeStreamAudioUrlRef.current) {
+        URL.revokeObjectURL(activeStreamAudioUrlRef.current);
+        activeStreamAudioUrlRef.current = null;
+      }
     };
   }, []);
 
   useEffect(() => {
-    const sourceTranscript = latestTranscript.trim();
-    if (!sourceTranscript) {
+    if (!isStreamAudioEnabled) {
       return;
     }
 
-    const requestKey = `${sourceTranscript}::${Object.values(panelTargets).join('|')}`;
-    if (requestKey === lastProcessedRequestKeyRef.current) {
+    const panelId = Object.keys(panelTargets).find((key) => panelTargets[key] === streamAudioLanguage);
+    if (!panelId) {
       return;
     }
 
-    lastProcessedRequestKeyRef.current = requestKey;
+    const lines = panelTranslations[panelId]
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const currentCount = lines.length;
+    const previousCount = processedStreamLineCountsRef.current[streamAudioLanguage] ?? 0;
 
-    let cancelled = false;
+    if (currentCount < previousCount) {
+      processedStreamLineCountsRef.current[streamAudioLanguage] = currentCount;
+      return;
+    }
 
-    const appendChunk = (existing: string, nextChunk: string) => {
-      if (!nextChunk.trim()) return existing;
-      const combined = existing ? `${existing}\n${nextChunk}` : nextChunk;
-      const lines = combined.split('\n').filter(line => line.trim().length > 0);
-      return lines.slice(-MAX_TRANSLATION_LINES).join('\n');
-    };
+    if (currentCount === previousCount) {
+      return;
+    }
 
-    const runBatchTranslation = async () => {
-      setIsTranslating(true);
-      const currentTargets = { ...panelTargets };
+    processedStreamLineCountsRef.current[streamAudioLanguage] = currentCount;
 
-      const { results: languageResults, metrics: nmtMetrics } = await TranslationService.translateBatch(
-        sourceTranscript,
-        Object.values(currentTargets),
-        'en'
-      );
+    const pendingLines = lines.slice(previousCount);
+    if (pendingLines.length === 0) {
+      return;
+    }
 
-      if (nmtMetrics) setLastNmtMetrics(nmtMetrics);
+    const pendingSentences = pendingLines.flatMap((line) => {
+      const parts = line.match(/[^.!?।]+[.!?।]?/g);
+      return (parts && parts.length > 0 ? parts : [line]).map((part) => part.trim()).filter(Boolean);
+    });
 
-      if (cancelled) return;
+    if (pendingSentences.length === 0) {
+      return;
+    }
 
-      setPanelTranslations(prev => {
-        return {
-          'panel-1': appendChunk(prev['panel-1'], languageResults[currentTargets['panel-1']] || ''),
-          'panel-2': appendChunk(prev['panel-2'], languageResults[currentTargets['panel-2']] || ''),
-          'panel-3': appendChunk(prev['panel-3'], languageResults[currentTargets['panel-3']] || ''),
-        };
-      });
-      setIsTranslating(false);
-    };
+    enqueueStreamAudio(pendingSentences, streamAudioLanguage);
+  }, [enqueueStreamAudio, getStreamAudioSentences, isStreamAudioEnabled, panelTargets, panelTranslations, streamAudioLanguage]);
 
-    void runBatchTranslation();
+  useEffect(() => {
+    if (availableStreamAudioLanguages.length === 0) {
+      setIsStreamAudioEnabled(false);
+      isStreamAudioEnabledRef.current = false;
+      stopStreamAudioPlayback();
+      return;
+    }
 
+    if (!availableStreamAudioLanguages.includes(streamAudioLanguage)) {
+      setStreamAudioLanguage(availableStreamAudioLanguages[0]);
+    }
+  }, [availableStreamAudioLanguages, streamAudioLanguage, stopStreamAudioPlayback]);
+
+  useEffect(() => {
     return () => {
-      cancelled = true;
-      setIsTranslating(false);
+      translationQueueRef.current = [];
     };
-  }, [latestTranscript, panelTargets]);
+  }, []);
 
   return (
     <div className={styles.container}>
-      <Sidebar onDeviceSelect={() => {}} />
+      <Sidebar
+        onDeviceSelect={() => {}}
+        isStreamAudioEnabled={isStreamAudioEnabled}
+        streamAudioLanguage={streamAudioLanguage}
+        availableStreamAudioLanguages={availableStreamAudioLanguages}
+        streamAudioQueueSize={streamAudioQueueSize}
+        isStreamingAudioActive={isStreamingAudioActive}
+        onStreamAudioEnabledChange={handleStreamAudioEnabledChange}
+        onStreamAudioLanguageChange={handleStreamAudioLanguageChange}
+        onSaveSettings={handleSaveStreamAudioSettings}
+        hasUnsavedSettings={hasUnsavedStreamAudioSettings}
+        settingsMessage={streamAudioSettingsMessage}
+      />
 
       <main className={styles.mainContent}>
         <header className={styles.header}>

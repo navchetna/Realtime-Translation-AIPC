@@ -9,6 +9,16 @@ export interface TtsSynthesizeResult {
   metrics: TtsMetrics | null;
 }
 
+export const TTS_SUPPORTED_LANGUAGES = [
+  'Hindi',
+  'Bengali',
+  'Tamil',
+  'Telugu',
+  'Kannada',
+  'Malayalam',
+  'Punjabi',
+] as const;
+
 export class TtsService {
   private static readonly ttsLangMap: Record<string, string> = {
     Hindi: 'hi',

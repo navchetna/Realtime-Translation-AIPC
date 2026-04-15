@@ -19,19 +19,49 @@ interface Props {
  */
 export function VADController({ isListening, onTranscript, onLog, onSpeakingChange, onAsrMetrics }: Props) {
   const prevLoading = useRef(true);
+  const sttAudioQueueRef = useRef<Float32Array[]>([]);
+  const isSttQueueRunningRef = useRef(false);
+  const MAX_STT_AUDIO_QUEUE = 6;
 
-  const handleSpeechEnd = useCallback(async (audio: Float32Array) => {
-    onSpeakingChange(false);
-    try {
-      const exactPcmBytes = new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength).slice();
-      const audioBlob = new Blob([exactPcmBytes], { type: 'application/octet-stream' });
-      const { text, metrics } = await AsrService.transcribeAudio(audioBlob);
-      if (text?.trim()) onTranscript(text);
-      if (metrics && onAsrMetrics) onAsrMetrics(metrics);
-    } catch (err) {
-      console.error('ASR Error:', err);
+  const pumpSttQueue = useCallback(() => {
+    if (isSttQueueRunningRef.current) {
+      return;
     }
-  }, [onTranscript, onSpeakingChange, onAsrMetrics]);
+
+    const nextAudio = sttAudioQueueRef.current.shift();
+    if (!nextAudio) {
+      return;
+    }
+
+    isSttQueueRunningRef.current = true;
+
+    const exactPcmBytes = new Uint8Array(nextAudio.buffer, nextAudio.byteOffset, nextAudio.byteLength).slice();
+    const audioBlob = new Blob([exactPcmBytes], { type: 'application/octet-stream' });
+
+    AsrService.transcribeAudio(audioBlob)
+      .then(({ text, metrics }) => {
+        if (text?.trim()) onTranscript(text);
+        if (metrics && onAsrMetrics) onAsrMetrics(metrics);
+      })
+      .catch((err) => {
+        console.error('ASR Error:', err);
+      })
+      .finally(() => {
+        isSttQueueRunningRef.current = false;
+        pumpSttQueue();
+      });
+  }, [onAsrMetrics, onTranscript]);
+
+  const handleSpeechEnd = useCallback((audio: Float32Array) => {
+    onSpeakingChange(false);
+
+    sttAudioQueueRef.current.push(audio.slice());
+    if (sttAudioQueueRef.current.length > MAX_STT_AUDIO_QUEUE) {
+      sttAudioQueueRef.current = sttAudioQueueRef.current.slice(-MAX_STT_AUDIO_QUEUE);
+    }
+
+    pumpSttQueue();
+  }, [onSpeakingChange, pumpSttQueue]);
 
   const vad = useMicVAD({
     // Preload model/runtime on mount but keep microphone off until user starts.
@@ -80,6 +110,12 @@ export function VADController({ isListening, onTranscript, onLog, onSpeakingChan
       // keep the log updated while loading
     }
   }, [vad.loading, vad.errored, onLog]);
+
+  useEffect(() => {
+    return () => {
+      sttAudioQueueRef.current = [];
+    };
+  }, []);
 
   // This component renders nothing visible — it's purely a logic controller
   return null;

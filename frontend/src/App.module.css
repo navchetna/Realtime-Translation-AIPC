@@ -31,6 +31,12 @@
   overflow-y: auto;
   overflow-x: hidden;
   height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebarBody {
+  flex: 1;
 }
 
 .collapseBtn {
@@ -135,6 +141,83 @@
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.toggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.toggleButton {
+  width: 100%;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-main);
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.toggleButton:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: rgba(0, 104, 181, 0.12);
+}
+
+.toggleButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.toggleButtonActive {
+  border-color: rgba(16, 185, 129, 0.6);
+  background: rgba(16, 185, 129, 0.18);
+}
+
+.toggleButtonState {
+  min-width: 44px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+
+.streamStatus {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.sidebarFooter {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--glass-border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.saveMessage {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
 }
 
 .select, .input {

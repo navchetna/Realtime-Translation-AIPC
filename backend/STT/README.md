@@ -16,7 +16,7 @@
 
 3. Choose runtime variables (optional):
    ```bash
-   set ASR_DEVICE=CPU
+   set ASR_DEVICE=GPU
    set ASR_MODEL_NAME=distil_whisper_large
    ```
 
