@@ -8,6 +8,7 @@ interface Props {
   streamAudioLanguage: string;
   availableStreamAudioLanguages: string[];
   streamAudioQueueSize: number;
+  audioPlaybackQueueSize: number;
   isStreamingAudioActive: boolean;
   onStreamAudioEnabledChange: (enabled: boolean) => void;
   onStreamAudioLanguageChange: (language: string) => void;
@@ -22,6 +23,7 @@ export const Sidebar: React.FC<Props> = ({
   streamAudioLanguage,
   availableStreamAudioLanguages,
   streamAudioQueueSize,
+  audioPlaybackQueueSize,
   isStreamingAudioActive,
   onStreamAudioEnabledChange,
   onStreamAudioLanguageChange,
@@ -164,7 +166,7 @@ export const Sidebar: React.FC<Props> = ({
                     ? 'Streaming to speakers'
                     : 'Waiting for translated audio'}
               </span>
-              <span>Queue: {streamAudioQueueSize}</span>
+              <span>TTS Queue: {streamAudioQueueSize} | Playback: {audioPlaybackQueueSize}</span>
             </div>
           </div>
 

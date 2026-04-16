@@ -19,6 +19,11 @@ type StreamAudioItem = {
   language: string;
 };
 
+type AudioPlaybackItem = {
+  audioBlob: Blob;
+  metrics: TtsMetrics | null;
+};
+
 function App() {
   const [vadReady, setVadReady] = useState(false);
   const [vadError, setVadError] = useState(false);
@@ -56,6 +61,10 @@ function App() {
   const activeStreamAudioUrlRef = useRef<string | null>(null);
   const streamAudioQueueRef = useRef<StreamAudioItem[]>([]);
   const isStreamQueueRunningRef = useRef(false);
+  const MAX_AUDIO_PLAYBACK_QUEUE = 10;
+  const audioPlaybackQueueRef = useRef<AudioPlaybackItem[]>([]);
+  const isAudioPlaybackRunningRef = useRef(false);
+  const [audioPlaybackQueueSize, setAudioPlaybackQueueSize] = useState(0);
   const processedStreamLineCountsRef = useRef<Record<string, number>>({});
 
   const [showMetrics, setShowMetrics] = useState(false);
@@ -266,8 +275,11 @@ function App() {
 
   const stopStreamAudioPlayback = useCallback(() => {
     streamAudioQueueRef.current = [];
+    audioPlaybackQueueRef.current = [];
     setStreamAudioQueueSize(0);
+    setAudioPlaybackQueueSize(0);
     setIsStreamingAudioActive(false);
+    isAudioPlaybackRunningRef.current = false;
 
     if (activeStreamAudioRef.current) {
       activeStreamAudioRef.current.pause();
@@ -279,6 +291,77 @@ function App() {
       URL.revokeObjectURL(activeStreamAudioUrlRef.current);
       activeStreamAudioUrlRef.current = null;
     }
+  }, []);
+
+  const pumpAudioPlaybackQueue = useCallback(() => {
+    if (isAudioPlaybackRunningRef.current) {
+      return;
+    }
+
+    if (audioPlaybackQueueRef.current.length === 0) {
+      setIsStreamingAudioActive(false);
+      return;
+    }
+
+    isAudioPlaybackRunningRef.current = true;
+    setIsStreamingAudioActive(true);
+
+    const nextPlaybackItem = audioPlaybackQueueRef.current.shift();
+    setAudioPlaybackQueueSize(audioPlaybackQueueRef.current.length);
+
+    if (!nextPlaybackItem) {
+      isAudioPlaybackRunningRef.current = false;
+      pumpAudioPlaybackQueue();
+      return;
+    }
+
+    if (activeStreamAudioRef.current) {
+      activeStreamAudioRef.current.pause();
+      activeStreamAudioRef.current.currentTime = 0;
+      activeStreamAudioRef.current = null;
+    }
+
+    if (activeStreamAudioUrlRef.current) {
+      URL.revokeObjectURL(activeStreamAudioUrlRef.current);
+      activeStreamAudioUrlRef.current = null;
+    }
+
+    const audioUrl = URL.createObjectURL(nextPlaybackItem.audioBlob);
+    const audio = new Audio(audioUrl);
+    activeStreamAudioRef.current = audio;
+    activeStreamAudioUrlRef.current = audioUrl;
+
+    const cleanup = () => {
+      audio.onended = null;
+      audio.onerror = null;
+      if (activeStreamAudioRef.current === audio) {
+        activeStreamAudioRef.current = null;
+      }
+      if (activeStreamAudioUrlRef.current === audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+        activeStreamAudioUrlRef.current = null;
+      }
+    };
+
+    audio.onended = () => {
+      cleanup();
+      isAudioPlaybackRunningRef.current = false;
+      pumpAudioPlaybackQueue();
+    };
+
+    audio.onerror = () => {
+      console.warn('Stream audio playback error');
+      cleanup();
+      isAudioPlaybackRunningRef.current = false;
+      pumpAudioPlaybackQueue();
+    };
+
+    audio.play().catch((error) => {
+      console.warn('Stream audio play failed:', error);
+      cleanup();
+      isAudioPlaybackRunningRef.current = false;
+      pumpAudioPlaybackQueue();
+    });
   }, []);
 
   const pumpStreamAudioQueue = useCallback(async () => {
@@ -296,8 +379,6 @@ function App() {
         continue;
       }
 
-      setIsStreamingAudioActive(true);
-
       try {
         const { audioBlob, metrics } = await TtsService.synthesize(nextItem.text, nextItem.language);
         if (metrics) {
@@ -308,46 +389,20 @@ function App() {
           break;
         }
 
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const audio = new Audio(audioUrl);
-        activeStreamAudioRef.current = audio;
-        activeStreamAudioUrlRef.current = audioUrl;
+        audioPlaybackQueueRef.current.push({ audioBlob, metrics });
+        if (audioPlaybackQueueRef.current.length > MAX_AUDIO_PLAYBACK_QUEUE) {
+          audioPlaybackQueueRef.current = audioPlaybackQueueRef.current.slice(-MAX_AUDIO_PLAYBACK_QUEUE);
+        }
+        setAudioPlaybackQueueSize(audioPlaybackQueueRef.current.length);
 
-        await new Promise<void>((resolve, reject) => {
-          const cleanup = () => {
-            audio.onended = null;
-            audio.onerror = null;
-            if (activeStreamAudioRef.current === audio) {
-              activeStreamAudioRef.current = null;
-            }
-            if (activeStreamAudioUrlRef.current === audioUrl) {
-              URL.revokeObjectURL(audioUrl);
-              activeStreamAudioUrlRef.current = null;
-            }
-          };
-
-          audio.onended = () => {
-            cleanup();
-            resolve();
-          };
-          audio.onerror = () => {
-            cleanup();
-            reject(new Error('Stream audio playback failed'));
-          };
-
-          void audio.play().catch((error) => {
-            cleanup();
-            reject(error);
-          });
-        });
+        pumpAudioPlaybackQueue();
       } catch (error) {
         console.warn('Stream audio generation failed:', error);
       }
     }
 
     isStreamQueueRunningRef.current = false;
-    setIsStreamingAudioActive(false);
-  }, []);
+  }, [pumpAudioPlaybackQueue]);
 
   const enqueueStreamAudio = useCallback((sentences: string[], language: string) => {
     if (!isStreamAudioEnabledRef.current || !STREAMABLE_LANGUAGES.includes(language as typeof STREAMABLE_LANGUAGES[number])) {
@@ -504,8 +559,7 @@ function App() {
 
   useEffect(() => {
     return () => {
-      translationQueueRef.current = [];
-    };
+      translationQueueRef.current = [];      audioPlaybackQueueRef.current = [];    };
   }, []);
 
   return (
@@ -516,6 +570,7 @@ function App() {
         streamAudioLanguage={streamAudioLanguage}
         availableStreamAudioLanguages={availableStreamAudioLanguages}
         streamAudioQueueSize={streamAudioQueueSize}
+        audioPlaybackQueueSize={audioPlaybackQueueSize}
         isStreamingAudioActive={isStreamingAudioActive}
         onStreamAudioEnabledChange={handleStreamAudioEnabledChange}
         onStreamAudioLanguageChange={handleStreamAudioLanguageChange}
