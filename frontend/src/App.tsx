@@ -677,7 +677,7 @@ function App() {
                 <span className={styles.metricsGroupLabel}>NMT</span>
                 <div className={styles.metricChip}>
                   <span className={styles.metricChipLabel}>Latency</span>
-                  <span className={styles.metricChipValue}>{lastNmtMetrics.latency_ms} ms</span>
+                  <span className={styles.metricChipValue}>{lastNmtMetrics.latency_ms.toFixed(1)} ms</span>
                 </div>
                 <div className={styles.metricChip}>
                   <span className={styles.metricChipLabel}>Tokens/s</span>
@@ -697,11 +697,11 @@ function App() {
                 <span className={styles.metricsGroupLabel}>TTS</span>
                 <div className={styles.metricChip}>
                   <span className={styles.metricChipLabel}>Latency</span>
-                  <span className={styles.metricChipValue}>{lastTtsMetrics.latency_ms} ms</span>
+                  <span className={styles.metricChipValue}>{lastTtsMetrics.latency_ms.toFixed(1)} ms</span>
                 </div>
                 <div className={styles.metricChip}>
                   <span className={styles.metricChipLabel}>Audio</span>
-                  <span className={styles.metricChipValue}>{lastTtsMetrics.audio_duration_s} s</span>
+                  <span className={styles.metricChipValue}>{lastTtsMetrics.audio_duration_s.toFixed(3)} s</span>
                 </div>
                 <div className={styles.metricChip}>
                   <span className={styles.metricChipLabel}>RTF</span>

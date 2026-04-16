@@ -256,15 +256,18 @@ async def inference_pipeline(request: PipelineRequest):
     audio_items = []
     total_audio_duration_s = 0.0
     total_base64_chars = 0
+    total_characters = 0
     for item in request.inputData.input:
         _log_tts_input(req_id, "pipeline", lang_code, gender, requested_sr, item.source)
         b64_audio, audio_duration_s = await asyncio.to_thread(_synthesize, tts_app, item.source, gender, requested_sr)
         total_audio_duration_s += audio_duration_s
         total_base64_chars += len(b64_audio)
+        total_characters += len(item.source)
         audio_items.append(AudioItem(audioContent=b64_audio, audioUri=None))
 
     latency_ms = round((time.perf_counter() - t_start) * 1000, 2)
     rtf = round((latency_ms / 1000) / total_audio_duration_s, 4) if total_audio_duration_s > 0 else 0.0
+    synthesis_speed = round(total_characters / (latency_ms / 1000), 1) if latency_ms > 0 else 0.0
     _log_tts_metrics(
         req_id=req_id,
         endpoint="pipeline",
@@ -294,6 +297,8 @@ async def inference_pipeline(request: PipelineRequest):
                     "latency_ms": latency_ms,
                     "audio_duration_s": round(total_audio_duration_s, 3),
                     "rtf": rtf,
+                    "characters_processed": total_characters,
+                    "synthesis_speed_chars_per_sec": synthesis_speed,
                 },
             )
         ]
@@ -317,6 +322,7 @@ async def tts_compat(request: SimpleTtsRequest):
     b64_audio, audio_duration_s = await asyncio.to_thread(_synthesize, tts_app, sentence, gender, request.samplingRate)
     latency_ms = round((time.perf_counter() - t_start) * 1000, 2)
     rtf = round((latency_ms / 1000) / audio_duration_s, 4) if audio_duration_s > 0 else 0.0
+    synthesis_speed = round(len(sentence) / (latency_ms / 1000), 1) if latency_ms > 0 else 0.0
     _log_tts_metrics(
         req_id=req_id,
         endpoint="tts",
@@ -339,6 +345,8 @@ async def tts_compat(request: SimpleTtsRequest):
             "latency_ms": latency_ms,
             "audio_duration_s": round(audio_duration_s, 3),
             "rtf": rtf,
+            "characters_processed": len(sentence),
+            "synthesis_speed_chars_per_sec": synthesis_speed,
         },
     }
 

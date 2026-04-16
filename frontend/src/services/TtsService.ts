@@ -2,6 +2,8 @@ export interface TtsMetrics {
   latency_ms: number;
   audio_duration_s: number;
   rtf: number;
+  characters_processed?: number;
+  synthesis_speed_chars_per_sec?: number;
 }
 
 export interface TtsSynthesizeResult {
