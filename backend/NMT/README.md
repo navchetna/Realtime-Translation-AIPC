@@ -13,12 +13,12 @@ uv pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cpu
 2. Install the indic tokenizer:
 ```bash
 uv pip install -r requirements.txt
-uv pip install indictranstoolkit
+uv pip install IndicTransToolkit
 ```
 
 3. Convert the model to OpenVINO IR format:
 ```bash
-python convert_indictrans2_ov.py   --model-name ai4bharat/indictrans2-indic-indic-1B --output-dir ./openvino_models/indictrans2-indic-indic-1B-fp16/ --device GPU
+python convert_indictrans2_ov.py   --model-name ai4bharat/indictrans2-en-indic-1B --output-dir ./openvino_models/indictrans2-en-indic-1B-fp16/ --device GPU
 ```
 
 OR
