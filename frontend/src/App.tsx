@@ -765,15 +765,15 @@ function App() {
             </h2>
           </div>
 
-          <div style={{ position: 'absolute', right: '16px', top: '0px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+          <div style={{ position: 'absolute', right: '12px', top: '-28px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
             <div
               style={{
                 position: 'relative',
                 width: '120px',
                 height: '80px',
-                borderRadius: '0px',
+                borderRadius: '0',
                 overflow: 'hidden',
-                opacity: 0.7,
+                opacity: 0.82,
               }}
             >
               <img
@@ -783,8 +783,8 @@ function App() {
                   width: '100%',
                   height: '100%',
                   objectFit: 'cover',
-                  opacity: 0.9,
-                  filter: 'brightness(1.2) saturate(0.85) blur(0.2px)',
+                  opacity: 0.94,
+                  filter: 'brightness(1.4) saturate(0.9) blur(0.1px)',
                 }}
               />
               <div
@@ -792,7 +792,7 @@ function App() {
                 style={{
                   position: 'absolute',
                   inset: 0,
-                  background: 'radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.08), rgba(15, 23, 42, 0.15))',
+                  background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.12) 0%, rgba(30, 41, 59, 0.22) 55%, rgba(15, 23, 42, 0.32) 100%)',
                   pointerEvents: 'none',
                 }}
               />
