@@ -3,7 +3,7 @@ import styles from './App.module.css';
 import { Sidebar } from './components/Sidebar';
 import { TranslationPanel } from './components/TranslationPanel';
 import { VADController } from './components/VADController';
-import { Activity, MicOff, Loader2, AlertCircle, BarChart2, FileText } from 'lucide-react';
+import { Activity, MicOff, Loader2, AlertCircle, FileText } from 'lucide-react';
 import { ENABLE_SENTENCE_COMPLETENESS_BUFFER, MIN_TRANSCRIPT_BUFFER_WORDS, PREDEFINED_SUMMARY_TEXT } from './config/appConfig';
 import { TranslationService } from './services/TranslationService';
 import { TtsService, TTS_SUPPORTED_LANGUAGES } from './services/TtsService';
@@ -68,10 +68,9 @@ function App() {
   const [audioPlaybackQueueSize, setAudioPlaybackQueueSize] = useState(0);
   const processedStreamLineCountsRef = useRef<Record<string, number>>({});
 
-  const [showMetrics, setShowMetrics] = useState(false);
-  const [lastAsrMetrics, setLastAsrMetrics] = useState<AsrMetrics | null>(null);
-  const [lastNmtMetrics, setLastNmtMetrics] = useState<NmtMetrics | null>(null);
-  const [lastTtsMetrics, setLastTtsMetrics] = useState<TtsMetrics | null>(null);
+  const [, setLastAsrMetrics] = useState<AsrMetrics | null>(null);
+  const [, setLastNmtMetrics] = useState<NmtMetrics | null>(null);
+  const [, setLastTtsMetrics] = useState<TtsMetrics | null>(null);
 
   const availableStreamAudioLanguages = Array.from(
     new Set(
@@ -185,6 +184,16 @@ function App() {
     pumpTranslationQueue();
   }, [pumpTranslationQueue]);
 
+  const flushPendingTranscriptBuffer = useCallback(() => {
+    const pendingTranscript = pendingTranscriptBufferRef.current.trim();
+    if (!pendingTranscript) {
+      return;
+    }
+
+    pendingTranscriptBufferRef.current = '';
+    enqueueTranscriptForTranslation(pendingTranscript);
+  }, [enqueueTranscriptForTranslation]);
+
   const handleTranscript = useCallback((text: string) => {
     const normalized = text.trim();
     if (!normalized) {
@@ -256,9 +265,9 @@ function App() {
 
   useEffect(() => {
     if (!isListening) {
-      pendingTranscriptBufferRef.current = '';
+      flushPendingTranscriptBuffer();
     }
-  }, [isListening]);
+  }, [flushPendingTranscriptBuffer, isListening]);
 
   useEffect(() => {
     try {
@@ -312,16 +321,17 @@ function App() {
     };
   }, []);
 
-  const handleStartListening = () => {
+  const handleStartListening = useCallback(() => {
     if (!vadReady || vadError) return;
 
     if (isListening) {
+      flushPendingTranscriptBuffer();
       setIsListening(false);
       setIsSpeaking(false);
     } else {
       setIsListening(true);
     }
-  };
+  }, [flushPendingTranscriptBuffer, isListening, vadError, vadReady]);
 
   const isLoading = !vadReady && !vadError;
 
@@ -721,144 +731,83 @@ function App() {
       />
 
       <main className={styles.mainContent}>
-        <header className={styles.header}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <header className={styles.header} style={{ justifyContent: 'flex-start', position: 'relative' }}>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
             <img
-              src="/intel-logo.svg"
+              src="/intel-logo.png"
               alt="Intel Logo"
               style={{
-                height: '52px',
-                filter: 'brightness(1.2) drop-shadow(0 2px 10px rgba(0, 199, 253, 0.3))',
+                height: '40px',
+                filter: 'brightness(1.2) drop-shadow(0 2px 8px rgba(0, 199, 253, 0.3))',
                 transition: 'all 0.3s ease'
               }}
             />
-            <h1>Real-time Multi-lingual Translation</h1>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+          <div
+            style={{
+              position: 'absolute',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              textAlign: 'center',
+              gap: '4px',
+            }}
+          >
+            <h1 style={{ margin: 0 }}>
+              Intel® Core™ Ultra Series 3
+            </h1>
+
+            <h2 style={{ margin: 0 }}>
+              Real-time English Voice to Indic Text
+            </h2>
+          </div>
+
+          <div style={{ position: 'absolute', right: '16px', top: '0px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+            <div
+              style={{
+                position: 'relative',
+                width: '120px',
+                height: '80px',
+                borderRadius: '0px',
+                overflow: 'hidden',
+                opacity: 0.7,
+              }}
+            >
+              <img
+                src="/cat_eyes.jpg"
+                alt="Cat"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  opacity: 0.9,
+                  filter: 'brightness(1.2) saturate(0.85) blur(0.2px)',
+                }}
+              />
+              <div
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  background: 'radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.08), rgba(15, 23, 42, 0.15))',
+                  pointerEvents: 'none',
+                }}
+              />
+            </div>
+
             <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-              {vadError ? (
+              {vadError && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger)' }}>
                   <AlertCircle size={18} /> VAD failed to load
                 </div>
-              ) : (
-                <>
-                  <button
-                    className={styles.button}
-                    style={{
-                      background: isListening ? 'rgba(239, 68, 68, 0.25)' : 'var(--primary)',
-                      border: isListening ? '1px solid rgba(239, 68, 68, 0.45)' : '1px solid transparent',
-                      color: isListening ? '#fecaca' : 'white',
-                      padding: '12px 24px',
-                      borderRadius: '30px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      opacity: isLoading ? 0.7 : 1,
-                      cursor: isLoading ? 'not-allowed' : 'pointer',
-                    }}
-                    onClick={handleStartListening}
-                    disabled={isLoading}
-                  >
-                    {isLoading ? (
-                      <><Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> Loading VAD...</>
-                    ) : isListening ? (
-                      <><MicOff size={18} /> Stop Listening</>
-                    ) : (
-                      <><Activity size={18} /> Start Listening</>
-                    )}
-                  </button>
-
-                  {isListening && !isLoading && isSpeaking && (
-                    <div className={styles.liveIndicator}>
-                      <div className={styles.liveDot} />
-                      Capturing Speech...
-                    </div>
-                  )}
-                  {isListening && !isLoading && !isSpeaking && (
-                    <div className={styles.liveIndicator} style={{ background: 'rgba(245, 158, 11, 0.1)', color: 'var(--warning)' }}>
-                      <div className={styles.liveDot} style={{ background: 'var(--warning)', animation: 'none' }} />
-                      Listening...
-                    </div>
-                  )}
-                </>
               )}
             </div>
 
-            <button
-              className={`${styles.metricsToggleBtn}${showMetrics ? ` ${styles.metricsToggleBtnActive}` : ''}`}
-              onClick={() => setShowMetrics(p => !p)}
-            >
-              <BarChart2 size={13} />
-              {showMetrics ? 'Hide Metrics' : 'Show Metrics'}
-            </button>
           </div>
         </header>
-
-        {showMetrics && (
-          <div className={styles.metricsBar}>
-            {lastAsrMetrics && (
-              <div className={styles.metricsGroup}>
-                <span className={styles.metricsGroupLabel}>ASR</span>
-                <div className={styles.metricChip}>
-                  <span className={styles.metricChipLabel}>Latency</span>
-                  <span className={styles.metricChipValue}>{lastAsrMetrics.latency_ms} ms</span>
-                </div>
-                <div className={styles.metricChip}>
-                  <span className={styles.metricChipLabel}>Audio</span>
-                  <span className={styles.metricChipValue}>{lastAsrMetrics.audio_duration_s} s</span>
-                </div>
-                <div className={styles.metricChip}>
-                  <span className={styles.metricChipLabel}>RTF</span>
-                  <span className={styles.metricChipValue}>{lastAsrMetrics.rtf.toFixed(3)}</span>
-                </div>
-              </div>
-            )}
-            {lastAsrMetrics && (lastNmtMetrics || lastTtsMetrics) && (
-              <div style={{ width: '1px', background: 'var(--glass-border)', alignSelf: 'stretch' }} />
-            )}
-            {lastNmtMetrics && (
-              <div className={styles.metricsGroup}>
-                <span className={styles.metricsGroupLabel}>NMT</span>
-                <div className={styles.metricChip}>
-                  <span className={styles.metricChipLabel}>Latency</span>
-                  <span className={styles.metricChipValue}>{lastNmtMetrics.latency_ms.toFixed(1)} ms</span>
-                </div>
-                <div className={styles.metricChip}>
-                  <span className={styles.metricChipLabel}>Tokens/s</span>
-                  <span className={styles.metricChipValue}>{lastNmtMetrics.tokens_per_sec.toFixed(1)}</span>
-                </div>
-                <div className={styles.metricChip}>
-                  <span className={styles.metricChipLabel}>~Tokens</span>
-                  <span className={styles.metricChipValue}>{lastNmtMetrics.approx_tokens}</span>
-                </div>
-              </div>
-            )}
-            {lastNmtMetrics && lastTtsMetrics && (
-              <div style={{ width: '1px', background: 'var(--glass-border)', alignSelf: 'stretch' }} />
-            )}
-            {lastTtsMetrics && (
-              <div className={styles.metricsGroup}>
-                <span className={styles.metricsGroupLabel}>TTS</span>
-                <div className={styles.metricChip}>
-                  <span className={styles.metricChipLabel}>Latency</span>
-                  <span className={styles.metricChipValue}>{lastTtsMetrics.latency_ms.toFixed(1)} ms</span>
-                </div>
-                <div className={styles.metricChip}>
-                  <span className={styles.metricChipLabel}>Audio</span>
-                  <span className={styles.metricChipValue}>{lastTtsMetrics.audio_duration_s.toFixed(3)} s</span>
-                </div>
-                <div className={styles.metricChip}>
-                  <span className={styles.metricChipLabel}>RTF</span>
-                  <span className={styles.metricChipValue}>{lastTtsMetrics.rtf.toFixed(3)}</span>
-                </div>
-              </div>
-            )}
-            {!lastAsrMetrics && !lastNmtMetrics && !lastTtsMetrics && (
-              <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Speak a phrase to see metrics.</span>
-            )}
-          </div>
-        )}
 
         <div className={styles.translationGrid} style={{ gridTemplateColumns: `repeat(${panelCount}, minmax(0, 1fr))` }}>
           {Array.from({ length: panelCount }, (_, i) => {
@@ -880,7 +829,48 @@ function App() {
         </div>
 
         {!vadError && (
-          <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <button
+                className={styles.button}
+                style={{
+                  background: isListening ? 'rgba(239, 68, 68, 0.25)' : 'var(--primary)',
+                  border: isListening ? '1px solid rgba(239, 68, 68, 0.45)' : '1px solid transparent',
+                  color: isListening ? '#fecaca' : 'white',
+                  padding: '12px 24px',
+                  borderRadius: '30px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  opacity: isLoading ? 0.7 : 1,
+                  cursor: isLoading ? 'not-allowed' : 'pointer',
+                }}
+                onClick={handleStartListening}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <><Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> Loading VAD...</>
+                ) : isListening ? (
+                  <><MicOff size={18} /> Stop Listening</>
+                ) : (
+                  <><Activity size={18} /> Start Listening</>
+                )}
+              </button>
+
+              {isListening && !isLoading && isSpeaking && (
+                <div className={styles.liveIndicator}>
+                  <div className={styles.liveDot} />
+                  Capturing Speech...
+                </div>
+              )}
+              {isListening && !isLoading && !isSpeaking && (
+                <div className={styles.liveIndicator} style={{ background: 'rgba(245, 158, 11, 0.1)', color: 'var(--warning)' }}>
+                  <div className={styles.liveDot} style={{ background: 'var(--warning)', animation: 'none' }} />
+                  Listening...
+                </div>
+              )}
+            </div>
+
             <button
               className={styles.button}
               style={{
@@ -901,6 +891,10 @@ function App() {
             </button>
           </div>
         )}
+
+        <div className={styles.disclaimerText}>
+          This is an AI generated content and may not be fully accurate.
+        </div>
       </main>
 
       <VADController

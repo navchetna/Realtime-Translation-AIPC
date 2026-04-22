@@ -66,6 +66,8 @@ export function VADController({ isListening, onTranscript, onLog, onSpeakingChan
   const vad = useMicVAD({
     // Preload model/runtime on mount but keep microphone off until user starts.
     startOnLoad: false,
+    // Flush any active speech chunk when the user pauses listening.
+    submitUserSpeechOnPause: true,
     onSpeechStart: () => onSpeakingChange(true),
     onSpeechEnd: handleSpeechEnd,
     positiveSpeechThreshold: VAD_CONFIG.POSITIVE_SPEECH_THRESHOLD,
