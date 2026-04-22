@@ -126,9 +126,8 @@ function App() {
         if (nmtMetrics) setLastNmtMetrics(nmtMetrics);
 
         setPanelTranslations(prev => {
-          const updated: Record<string, string> = {};
-          for (let i = 1; i <= panelCount; i++) {
-            const panelId = `panel-${i}`;
+          const updated: Record<string, string> = { ...prev };
+          for (const panelId of Object.keys(currentTargets)) {
             updated[panelId] = appendChunk(prev[panelId] || '', languageResults[currentTargets[panelId]] || '');
           }
           return updated;
