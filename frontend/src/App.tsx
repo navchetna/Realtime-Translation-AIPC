@@ -3,7 +3,8 @@ import styles from './App.module.css';
 import { Sidebar } from './components/Sidebar';
 import { TranslationPanel } from './components/TranslationPanel';
 import { VADController } from './components/VADController';
-import { Activity, MicOff, Loader2, AlertCircle, ChevronDown, ChevronUp, BarChart2 } from 'lucide-react';
+import { Activity, MicOff, Loader2, AlertCircle, BarChart2, FileText } from 'lucide-react';
+import { ENABLE_SENTENCE_COMPLETENESS_BUFFER, MIN_TRANSCRIPT_BUFFER_WORDS, PREDEFINED_SUMMARY_TEXT } from './config/appConfig';
 import { TranslationService } from './services/TranslationService';
 import { TtsService, TTS_SUPPORTED_LANGUAGES } from './services/TtsService';
 import type { NmtMetrics } from './services/TranslationService';
@@ -17,6 +18,7 @@ const STREAM_AUDIO_SETTINGS_KEY = 'realtime-translation:stream-audio-settings';
 type StreamAudioItem = {
   text: string;
   language: string;
+  forcePlayback?: boolean;
 };
 
 type AudioPlaybackItem = {
@@ -31,19 +33,17 @@ function App() {
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   const [isTranslating, setIsTranslating] = useState(false);
-  const [isAudioPanelCollapsed, setIsAudioPanelCollapsed] = useState(false);
+  const [panelCount, setPanelCount] = useState(2);
   const [panelTargets, setPanelTargets] = useState<Record<string, string>>({
-    'panel-1': 'English',
-    'panel-2': 'Tamil',
-    'panel-3': 'Punjabi',
+    'panel-1': 'Hindi',
+    'panel-2': 'English',
   });
   const [panelTranslations, setPanelTranslations] = useState<Record<string, string>>({
     'panel-1': '',
     'panel-2': '',
-    'panel-3': '',
   });
   const [isStreamAudioEnabled, setIsStreamAudioEnabled] = useState(false);
-  const [streamAudioLanguage, setStreamAudioLanguage] = useState<string>('Tamil');
+  const [streamAudioLanguage, setStreamAudioLanguage] = useState<string>('Hindi');
   const [streamAudioQueueSize, setStreamAudioQueueSize] = useState(0);
   const [isStreamingAudioActive, setIsStreamingAudioActive] = useState(false);
   const [hasUnsavedStreamAudioSettings, setHasUnsavedStreamAudioSettings] = useState(false);
@@ -52,6 +52,7 @@ function App() {
   const MAX_TRANSLATION_QUEUE = 8;
   const translationQueueRef = useRef<string[]>([]);
   const isTranslationQueueRunningRef = useRef(false);
+  const pendingTranscriptBufferRef = useRef('');
   const lastQueuedTranscriptRef = useRef('');
   const panelTargetsRef = useRef(panelTargets);
   const isStreamAudioEnabledRef = useRef(isStreamAudioEnabled);
@@ -125,11 +126,12 @@ function App() {
         if (nmtMetrics) setLastNmtMetrics(nmtMetrics);
 
         setPanelTranslations(prev => {
-          return {
-            'panel-1': appendChunk(prev['panel-1'], languageResults[currentTargets['panel-1']] || ''),
-            'panel-2': appendChunk(prev['panel-2'], languageResults[currentTargets['panel-2']] || ''),
-            'panel-3': appendChunk(prev['panel-3'], languageResults[currentTargets['panel-3']] || ''),
-          };
+          const updated: Record<string, string> = {};
+          for (let i = 1; i <= panelCount; i++) {
+            const panelId = `panel-${i}`;
+            updated[panelId] = appendChunk(prev[panelId] || '', languageResults[currentTargets[panelId]] || '');
+          }
+          return updated;
         });
       })
       .catch((error) => {
@@ -141,17 +143,41 @@ function App() {
       });
   }, [appendChunk]);
 
-  const handleTranscript = useCallback((text: string) => {
+  const getWordCount = useCallback((text: string) => {
+    return text.trim().split(/\s+/).filter(Boolean).length;
+  }, []);
+
+  const hasSentenceEnd = useCallback((text: string) => {
+    return /[.!?…।]\s*$/.test(text.trim());
+  }, []);
+
+  const endsAbruptly = useCallback((text: string) => {
+    const incompleteEndings = new Set([
+      'and', 'or', 'but', 'so', 'because', 'if', 'then',
+      'the', 'a', 'an', 'to', 'of', 'in', 'on', 'for', 'with'
+    ]);
+
+    const words = text.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const lastWord = words[words.length - 1];
+    return !!lastWord && incompleteEndings.has(lastWord);
+  }, []);
+
+  const isCompleteSentence = useCallback((text: string) => {
     const normalized = text.trim();
-    if (!normalized) {
+    if (!normalized) return false;
+    if (getWordCount(normalized) < MIN_TRANSCRIPT_BUFFER_WORDS) return false;
+    if (!hasSentenceEnd(normalized)) return false;
+    if (endsAbruptly(normalized)) return false;
+    return true;
+  }, [endsAbruptly, getWordCount, hasSentenceEnd]);
+
+  const enqueueTranscriptForTranslation = useCallback((text: string) => {
+    const normalized = text.trim();
+    if (!normalized || normalized === lastQueuedTranscriptRef.current) {
       return;
     }
 
-    if (normalized === lastQueuedTranscriptRef.current) {
-      return;
-    }
     lastQueuedTranscriptRef.current = normalized;
-
     translationQueueRef.current.push(normalized);
     if (translationQueueRef.current.length > MAX_TRANSLATION_QUEUE) {
       translationQueueRef.current = translationQueueRef.current.slice(-MAX_TRANSLATION_QUEUE);
@@ -160,10 +186,66 @@ function App() {
     pumpTranslationQueue();
   }, [pumpTranslationQueue]);
 
+  const handleTranscript = useCallback((text: string) => {
+    const normalized = text.trim();
+    if (!normalized) {
+      return;
+    }
+
+    if (ENABLE_SENTENCE_COMPLETENESS_BUFFER) {
+      const buffered = pendingTranscriptBufferRef.current.trim();
+      const combined = [buffered, normalized].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+      if (!combined) {
+        return;
+      }
+
+      if (!isCompleteSentence(combined)) {
+        pendingTranscriptBufferRef.current = combined;
+        return;
+      }
+
+      pendingTranscriptBufferRef.current = '';
+      enqueueTranscriptForTranslation(combined);
+      return;
+    }
+
+    const pendingTranscript = pendingTranscriptBufferRef.current.trim();
+    if (pendingTranscript) {
+      pendingTranscriptBufferRef.current = '';
+      enqueueTranscriptForTranslation(`${pendingTranscript} ${normalized}`.replace(/\s+/g, ' ').trim());
+      return;
+    }
+
+    if (getWordCount(normalized) < MIN_TRANSCRIPT_BUFFER_WORDS) {
+      pendingTranscriptBufferRef.current = normalized;
+      return;
+    }
+
+    enqueueTranscriptForTranslation(normalized);
+  }, [enqueueTranscriptForTranslation, getWordCount, isCompleteSentence]);
+
   const handlePanelLanguageChange = useCallback((panelId: string, language: string) => {
     setPanelTargets(prev => ({ ...prev, [panelId]: language }));
     setPanelTranslations(prev => ({ ...prev, [panelId]: '' }));
   }, []);
+
+  const handlePanelCountChange = useCallback((newCount: number) => {
+    const clamped = Math.max(1, Math.min(4, newCount));
+    setPanelCount(clamped);
+
+    const newTargets: Record<string, string> = {};
+    const newTranslations: Record<string, string> = {};
+    const defaultLanguages = ['Hindi', 'English', 'Kannada', 'Tamil'];
+
+    for (let i = 1; i <= clamped; i++) {
+      const panelId = `panel-${i}`;
+      newTargets[panelId] = panelTargets[panelId] || defaultLanguages[i - 1] || 'English';
+      newTranslations[panelId] = panelTranslations[panelId] || '';
+    }
+
+    setPanelTargets(newTargets);
+    setPanelTranslations(newTranslations);
+  }, [panelTargets, panelTranslations]);
 
   useEffect(() => {
     panelTargetsRef.current = panelTargets;
@@ -172,6 +254,12 @@ function App() {
   useEffect(() => {
     isStreamAudioEnabledRef.current = isStreamAudioEnabled;
   }, [isStreamAudioEnabled]);
+
+  useEffect(() => {
+    if (!isListening) {
+      pendingTranscriptBufferRef.current = '';
+    }
+  }, [isListening]);
 
   useEffect(() => {
     try {
@@ -212,10 +300,12 @@ function App() {
       .map((line) => line.trim())
       .filter(Boolean);
 
-    const sentences = lines.flatMap((line) => {
-      const parts = line.match(/[^.!?।]+[.!?।]?/g);
-      return (parts && parts.length > 0 ? parts : [line]).map((part) => part.trim()).filter(Boolean);
-    });
+    const splitSentences = (text: string) => {
+      const parts = text.match(/[^.!?।]+[.!?।]?/g);
+      return (parts && parts.length > 0 ? parts : [text]).map((part) => part.trim()).filter(Boolean);
+    };
+
+    const sentences = lines.flatMap((line) => splitSentences(line));
 
     return {
       lineCount: lines.length,
@@ -371,11 +461,15 @@ function App() {
 
     isStreamQueueRunningRef.current = true;
 
-    while (isStreamAudioEnabledRef.current && streamAudioQueueRef.current.length > 0) {
+    while (streamAudioQueueRef.current.length > 0) {
       const nextItem = streamAudioQueueRef.current.shift();
       setStreamAudioQueueSize(streamAudioQueueRef.current.length);
 
       if (!nextItem) {
+        continue;
+      }
+
+      if (!nextItem.forcePlayback && !isStreamAudioEnabledRef.current) {
         continue;
       }
 
@@ -385,7 +479,7 @@ function App() {
           setLastTtsMetrics(metrics);
         }
 
-        if (!isStreamAudioEnabledRef.current) {
+        if (!nextItem.forcePlayback && !isStreamAudioEnabledRef.current) {
           break;
         }
 
@@ -412,7 +506,29 @@ function App() {
     const nextItems = sentences
       .map((sentence) => sentence.trim())
       .filter(Boolean)
-      .map((text) => ({ text, language }));
+      .map((text) => ({ text, language, forcePlayback: false }));
+
+    if (nextItems.length === 0) {
+      return;
+    }
+
+    streamAudioQueueRef.current.push(...nextItems);
+    if (streamAudioQueueRef.current.length > MAX_STREAM_AUDIO_QUEUE) {
+      streamAudioQueueRef.current = streamAudioQueueRef.current.slice(-MAX_STREAM_AUDIO_QUEUE);
+    }
+    setStreamAudioQueueSize(streamAudioQueueRef.current.length);
+    void pumpStreamAudioQueue();
+  }, [pumpStreamAudioQueue]);
+
+  const enqueueSummaryAudio = useCallback((sentences: string[], language: string) => {
+    if (!STREAMABLE_LANGUAGES.includes(language as typeof STREAMABLE_LANGUAGES[number])) {
+      return;
+    }
+
+    const nextItems = sentences
+      .map((sentence) => sentence.trim())
+      .filter(Boolean)
+      .map((text) => ({ text, language, forcePlayback: true }));
 
     if (nextItems.length === 0) {
       return;
@@ -559,13 +675,39 @@ function App() {
 
   useEffect(() => {
     return () => {
-      translationQueueRef.current = [];      audioPlaybackQueueRef.current = [];    };
+      pendingTranscriptBufferRef.current = '';
+      translationQueueRef.current = [];
+      audioPlaybackQueueRef.current = [];
+    };
   }, []);
+
+  const splitTextToSentences = useCallback((text: string) => {
+    const parts = text.match(/[^.!?।]+[.!?।]?/g);
+    return (parts && parts.length > 0 ? parts : [text]).map((part) => part.trim()).filter(Boolean);
+  }, []);
+
+  const hasAnyPanelContent = Object.values(panelTranslations).some((text) => text.trim().length > 0);
+  const canGenerateSummary = !isLoading && !vadError && !isListening && hasAnyPanelContent;
+
+  const handleGenerateSummary = useCallback(() => {
+    if (!canGenerateSummary) {
+      return;
+    }
+
+    const summarySentences = splitTextToSentences(PREDEFINED_SUMMARY_TEXT);
+    if (summarySentences.length === 0) {
+      return;
+    }
+
+    enqueueSummaryAudio(summarySentences, streamAudioLanguage);
+  }, [canGenerateSummary, enqueueSummaryAudio, splitTextToSentences, streamAudioLanguage]);
 
   return (
     <div className={styles.container}>
       <Sidebar
         onDeviceSelect={() => {}}
+        panelCount={panelCount}
+        onPanelCountChange={handlePanelCountChange}
         isStreamAudioEnabled={isStreamAudioEnabled}
         streamAudioLanguage={streamAudioLanguage}
         availableStreamAudioLanguages={availableStreamAudioLanguages}
@@ -601,42 +743,46 @@ function App() {
                   <AlertCircle size={18} /> VAD failed to load
                 </div>
               ) : (
-                <button
-                  className={styles.button}
-                  style={{
-                    background: isListening ? 'var(--danger)' : 'var(--primary)',
-                    padding: '12px 24px',
-                    borderRadius: '30px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    opacity: isLoading ? 0.7 : 1,
-                    cursor: isLoading ? 'not-allowed' : 'pointer',
-                  }}
-                  onClick={handleStartListening}
-                  disabled={isLoading}
-                >
-                  {isLoading ? (
-                    <><Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> Loading VAD...</>
-                  ) : isListening ? (
-                    <><MicOff size={18} /> Stop Listening</>
-                  ) : (
-                    <><Activity size={18} /> Start Listening</>
-                  )}
-                </button>
-              )}
+                <>
+                  <button
+                    className={styles.button}
+                    style={{
+                      background: isListening ? 'rgba(239, 68, 68, 0.25)' : 'var(--primary)',
+                      border: isListening ? '1px solid rgba(239, 68, 68, 0.45)' : '1px solid transparent',
+                      color: isListening ? '#fecaca' : 'white',
+                      padding: '12px 24px',
+                      borderRadius: '30px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      opacity: isLoading ? 0.7 : 1,
+                      cursor: isLoading ? 'not-allowed' : 'pointer',
+                    }}
+                    onClick={handleStartListening}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <><Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> Loading VAD...</>
+                    ) : isListening ? (
+                      <><MicOff size={18} /> Stop Listening</>
+                    ) : (
+                      <><Activity size={18} /> Start Listening</>
+                    )}
+                  </button>
 
-              {isListening && !isLoading && isSpeaking && (
-                <div className={styles.liveIndicator}>
-                  <div className={styles.liveDot} />
-                  Capturing Speech...
-                </div>
-              )}
-              {isListening && !isLoading && !isSpeaking && (
-                <div className={styles.liveIndicator} style={{ background: 'rgba(245, 158, 11, 0.1)', color: 'var(--warning)' }}>
-                  <div className={styles.liveDot} style={{ background: 'var(--warning)', animation: 'none' }} />
-                  Listening...
-                </div>
+                  {isListening && !isLoading && isSpeaking && (
+                    <div className={styles.liveIndicator}>
+                      <div className={styles.liveDot} />
+                      Capturing Speech...
+                    </div>
+                  )}
+                  {isListening && !isLoading && !isSpeaking && (
+                    <div className={styles.liveIndicator} style={{ background: 'rgba(245, 158, 11, 0.1)', color: 'var(--warning)' }}>
+                      <div className={styles.liveDot} style={{ background: 'var(--warning)', animation: 'none' }} />
+                      Listening...
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
@@ -715,53 +861,47 @@ function App() {
           </div>
         )}
 
-        <div className={`${styles.asrPanel} ${isAudioPanelCollapsed ? styles.asrPanelCollapsed : ''}`} style={{ marginBottom: '24px', marginTop: 0 }}>
-          <div className={styles.asrHeader}>
-            <div className={styles.asrTitle}>Audio Detection</div>
-            <button
-              className={styles.asrToggle}
-              onClick={() => setIsAudioPanelCollapsed(prev => !prev)}
-              aria-label={isAudioPanelCollapsed ? 'Expand audio status' : 'Collapse audio status'}
-            >
-              {isAudioPanelCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-            </button>
-          </div>
-          <div className={styles.asrContent}>
-            <div style={{ color: isSpeaking ? 'var(--success)' : 'var(--text-muted)', fontStyle: 'italic' }}>
-              {isSpeaking ? 'Audio detected' : 'No speech detected'}
-            </div>
-          </div>
+        <div className={styles.translationGrid} style={{ gridTemplateColumns: `repeat(${panelCount}, minmax(0, 1fr))` }}>
+          {Array.from({ length: panelCount }, (_, i) => {
+            const panelId = `panel-${i + 1}`;
+            const variantMap: Record<number, 'Color1' | 'Color2' | 'Color3' | 'Color1'> = { 0: 'Color1', 1: 'Color2', 2: 'Color3', 3: 'Color1' };
+            return (
+              <TranslationPanel
+                key={panelId}
+                id={panelId}
+                targetLang={panelTargets[panelId] || 'English'}
+                translatedText={panelTranslations[panelId] || ''}
+                isTranslating={isTranslating}
+                onTargetLangChange={handlePanelLanguageChange}
+                onSpeakSentence={playSentenceAudio}
+                variant={variantMap[i]}
+              />
+            );
+          })}
         </div>
 
-        <div className={styles.translationGrid}>
-          <TranslationPanel
-            id="panel-1"
-            targetLang={panelTargets['panel-1']}
-            translatedText={panelTranslations['panel-1']}
-            isTranslating={isTranslating}
-            onTargetLangChange={handlePanelLanguageChange}
-            onSpeakSentence={playSentenceAudio}
-            variant="Color1"
-          />
-          <TranslationPanel
-            id="panel-2"
-            targetLang={panelTargets['panel-2']}
-            translatedText={panelTranslations['panel-2']}
-            isTranslating={isTranslating}
-            onTargetLangChange={handlePanelLanguageChange}
-            onSpeakSentence={playSentenceAudio}
-            variant="Color2"
-          />
-          <TranslationPanel
-            id="panel-3"
-            targetLang={panelTargets['panel-3']}
-            translatedText={panelTranslations['panel-3']}
-            isTranslating={isTranslating}
-            onTargetLangChange={handlePanelLanguageChange}
-            onSpeakSentence={playSentenceAudio}
-            variant="Color3"
-          />
-        </div>
+        {!vadError && (
+          <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              className={styles.button}
+              style={{
+                background: 'rgba(16, 185, 129, 0.18)',
+                border: '1px solid rgba(16, 185, 129, 0.45)',
+                padding: '12px 20px',
+                borderRadius: '30px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                color: '#d1fae5',
+              }}
+              onClick={handleGenerateSummary}
+              disabled={!canGenerateSummary}
+              title="Queues predefined summary sentences for TTS playback"
+            >
+              <FileText size={18} /> Generate Summary
+            </button>
+          </div>
+        )}
       </main>
 
       <VADController

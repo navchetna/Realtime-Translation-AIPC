@@ -20,6 +20,21 @@ This is a premium, beautifully designed frontend for the Real-time Translation D
    ```
 4. Open the displayed local network URL in your browser.
 
+## Environment Variables
+
+Copy `.env.example` to `.env` if you want to override local defaults.
+
+- `VITE_STT_API_URL`: STT backend endpoint.
+- `VITE_NMT_API_URL`: NMT backend endpoint.
+- `VITE_TTS_API_URL`: TTS backend endpoint.
+- `VITE_MIN_TRANSCRIPT_BUFFER_WORDS`: Minimum word count required before a transcript is sent immediately for translation. If an ASR segment has fewer words than this value, the frontend buffers it and waits for the next segment, then sends both together in one translation request.
+- `VITE_ENABLE_SENTENCE_COMPLETENESS_BUFFER`: When `true`, transcript buffering switches to sentence-completeness mode (minimum words + sentence-ending punctuation + abrupt ending checks for conjunctions/prepositions). When `false`, the app uses the original min-word-only buffering logic.
+- `VITE_VAD_POSITIVE_SPEECH_THRESHOLD`: Silero speech probability threshold (0.0 to 1.0).
+- `VITE_VAD_NEGATIVE_SPEECH_THRESHOLD`: Silero silence probability threshold (0.0 to 1.0).
+- `VITE_VAD_MIN_SPEECH_MS`: Minimum speech duration before a segment is accepted.
+- `VITE_VAD_REDEMPTION_MS`: Silence tolerance before speech end is triggered.
+- `VITE_PREDEFINED_SUMMARY_TEXT`: Text used by the Generate Summary button. Use `\n` inside the env value if you want explicit line breaks.
+
 ## Features
 
 ### 1. Settings Sidebar
@@ -32,7 +47,7 @@ This is a premium, beautifully designed frontend for the Real-time Translation D
 - Transcripts appear live in the bottom ASR panel.
 
 ### 3. Multi-language Translation Panels
-- Contains 3 independent boxes for translation.
+- Contains 2 independent boxes for translation (defaults: Hindi and English).
 - Each box listens to the latest transcript emitted by the ASR service.
 - Features a mock streaming layout using `setInterval` to demonstrate character-by-character text generation similar to actual LLMs or real-time translation APIs.
 

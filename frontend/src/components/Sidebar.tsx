@@ -4,6 +4,8 @@ import { Mic, Volume2, User, AudioLines, CheckCircle, ChevronLeft, ChevronRight 
 
 interface Props {
   onDeviceSelect: (deviceId: string) => void;
+  panelCount: number;
+  onPanelCountChange: (count: number) => void;
   isStreamAudioEnabled: boolean;
   streamAudioLanguage: string;
   availableStreamAudioLanguages: string[];
@@ -19,6 +21,8 @@ interface Props {
 
 export const Sidebar: React.FC<Props> = ({
   onDeviceSelect,
+  panelCount,
+  onPanelCountChange,
   isStreamAudioEnabled,
   streamAudioLanguage,
   availableStreamAudioLanguages,
@@ -116,6 +120,49 @@ export const Sidebar: React.FC<Props> = ({
               <select className={styles.select} disabled>
                 <option>System Default (Static)</option>
               </select>
+            </div>
+
+            <div className={styles.inputGroup}>
+              <label className={styles.label}>
+                Number of Languages
+              </label>
+              <div className={styles.toggleRow}>
+                <button
+                  className={styles.button}
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    fontSize: '14px',
+                  }}
+                  onClick={() => onPanelCountChange(Math.max(1, panelCount - 1))}
+                  disabled={panelCount <= 1}
+                >
+                  −
+                </button>
+                <div style={{
+                  flex: 1,
+                  textAlign: 'center',
+                  padding: '8px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                }}>
+                  {panelCount}
+                </div>
+                <button
+                  className={styles.button}
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    fontSize: '14px',
+                  }}
+                  onClick={() => onPanelCountChange(Math.min(4, panelCount + 1))}
+                  disabled={panelCount >= 4}
+                >
+                  +
+                </button>
+              </div>
             </div>
           </div>
 

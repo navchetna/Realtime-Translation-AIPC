@@ -27,31 +27,15 @@ const LANGUAGES = [
 
 export const TranslationPanel: React.FC<Props> = ({ id, targetLang, translatedText, isTranslating, onTargetLangChange, onSpeakSentence, variant }) => {
   const bodyRef = useRef<HTMLDivElement>(null);
-  const [selectedSentence, setSelectedSentence] = useState('');
+  const [selectedChunk, setSelectedChunk] = useState('');
   const [isSpeakingSentence, setIsSpeakingSentence] = useState(false);
   const [speechError, setSpeechError] = useState('');
 
-  const sentences = useMemo(() => {
-    const result: string[] = [];
-    const lines = translatedText
+  const translatedChunks = useMemo(() => {
+    return translatedText
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
-
-    for (const line of lines) {
-      const parts = line.match(/[^.!?।]+[.!?।]?/g);
-      if (!parts || parts.length === 0) {
-        result.push(line);
-        continue;
-      }
-
-      for (const part of parts) {
-        const sentence = part.trim();
-        if (sentence) result.push(sentence);
-      }
-    }
-
-    return result;
   }, [translatedText]);
 
   useEffect(() => {
@@ -60,12 +44,12 @@ export const TranslationPanel: React.FC<Props> = ({ id, targetLang, translatedTe
     }
   }, [translatedText]);
 
-  const handleSentenceClick = async (sentence: string) => {
-    setSelectedSentence(sentence);
+  const handleChunkClick = async (chunk: string) => {
+    setSelectedChunk(chunk);
     setSpeechError('');
     setIsSpeakingSentence(true);
     try {
-      await onSpeakSentence(sentence, targetLang);
+      await onSpeakSentence(chunk, targetLang);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Audio playback failed';
       setSpeechError(message);
@@ -94,18 +78,18 @@ export const TranslationPanel: React.FC<Props> = ({ id, targetLang, translatedTe
       <div className={styles.panelBody} ref={bodyRef}>
         {translatedText ? (
           <div className={styles.sentenceList}>
-            {sentences.map((sentence, index) => (
+            {translatedChunks.map((chunk, index) => (
               <button
                 type="button"
-                key={`${sentence}-${index}`}
-                className={`${styles.sentenceButton}${selectedSentence === sentence ? ` ${styles.sentenceButtonSelected}` : ''}`}
+                key={`${chunk}-${index}`}
+                className={`${styles.sentenceButton}${selectedChunk === chunk ? ` ${styles.sentenceButtonSelected}` : ''}`}
                 onClick={() => {
-                  void handleSentenceClick(sentence);
+                  void handleChunkClick(chunk);
                 }}
                 disabled={isSpeakingSentence}
-                title="Click to play this sentence"
+                title="Click to play this translated chunk"
               >
-                {sentence}
+                {chunk}
               </button>
             ))}
           </div>

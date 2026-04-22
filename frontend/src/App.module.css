@@ -107,10 +107,28 @@
 
 .translationGrid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
   gap: 24px;
   flex: 1;
   min-height: 0;
+  align-items: stretch;
+}
+
+@media (max-width: 1400px) {
+  .translationGrid {
+    gap: 20px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .translationGrid {
+    gap: 16px;
+  }
+}
+
+@media (max-width: 900px) {
+  .translationGrid {
+    grid-template-columns: 1fr !important;
+  }
 }
 
 /* Sidebar Sections */
