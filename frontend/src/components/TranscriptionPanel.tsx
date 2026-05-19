@@ -24,15 +24,15 @@ export function TranscriptionPanel({
   // Auto-scroll to bottom when new transcriptions are added
   useEffect(() => {
     if (panelRef.current) {
-      // Use setTimeout to ensure DOM has updated
-      setTimeout(() => {
+      // Use requestAnimationFrame to ensure DOM has updated
+      requestAnimationFrame(() => {
         if (panelRef.current) {
           panelRef.current.scrollTo({
             top: panelRef.current.scrollHeight,
             behavior: 'smooth',
           });
         }
-      }, 100);
+      });
     }
   }, [transcriptions]);
 

@@ -22,8 +22,8 @@ REM Backend selection: onnx or openvino
 if not defined BACKEND set BACKEND=openvino
 
 REM Device settings
-if not defined DEVICE set DEVICE=GPU
-if not defined PRECISION set PRECISION=fp32
+if not defined DEVICE set DEVICE=CPU
+if not defined PRECISION set PRECISION=fp16
 
 REM Model paths
 if not defined MODEL_PRECISION set MODEL_PRECISION=fp16
