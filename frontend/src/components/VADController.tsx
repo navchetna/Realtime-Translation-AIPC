@@ -1,74 +1,81 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useMicVAD } from '@ricky0123/vad-react';
-import { AsrService } from '../services/AsrService';
-import type { AsrMetrics } from '../services/AsrService';
+import { asrService } from '../services/AsrService';
 import { VAD_CONFIG } from '../config/vadConfig';
+import type { TranscriptionResult } from '../types';
 
-interface Props {
+interface VADControllerProps {
   isListening: boolean;
-  onTranscript: (text: string) => void;
+  inputLanguage: string;
+  onTranscript: (result: TranscriptionResult) => void;
   onLog: (msg: string) => void;
   onSpeakingChange: (speaking: boolean) => void;
-  onAsrMetrics?: (metrics: AsrMetrics) => void;
 }
 
 /**
- * VADController is mounted ONLY after the user clicks "Start Listening".
- * This ensures useMicVAD (which loads a ~2MB ONNX model) never blocks the
- * initial page render.
+ * VADController is always mounted but controlled via isListening prop.
+ * This ensures useMicVAD doesn't reload repeatedly.
  */
-export function VADController({ isListening, onTranscript, onLog, onSpeakingChange, onAsrMetrics }: Props) {
+export function VADController({
+  isListening,
+  inputLanguage,
+  onTranscript,
+  onLog,
+  onSpeakingChange,
+}: VADControllerProps) {
   const prevLoading = useRef(true);
-  const sttAudioQueueRef = useRef<Float32Array[]>([]);
-  const isSttQueueRunningRef = useRef(false);
-  const MAX_STT_AUDIO_QUEUE = 6;
+  const audioQueue = useRef<Float32Array[]>([]);
+  const isProcessing = useRef(false);
+  const MAX_QUEUE_SIZE = 6;
 
-  const pumpSttQueue = useCallback(() => {
-    if (isSttQueueRunningRef.current) {
+  const processQueue = useCallback(() => {
+    if (isProcessing.current) {
       return;
     }
 
-    const nextAudio = sttAudioQueueRef.current.shift();
+    const nextAudio = audioQueue.current.shift();
     if (!nextAudio) {
       return;
     }
 
-    isSttQueueRunningRef.current = true;
+    isProcessing.current = true;
+    console.log('[VAD] 📤 Processing audio:', nextAudio.length, 'samples');
 
-    const exactPcmBytes = new Uint8Array(nextAudio.buffer, nextAudio.byteOffset, nextAudio.byteLength).slice();
-    const audioBlob = new Blob([exactPcmBytes], { type: 'application/octet-stream' });
-
-    AsrService.transcribeAudio(audioBlob)
-      .then(({ text, metrics }) => {
-        if (text?.trim()) onTranscript(text);
-        if (metrics && onAsrMetrics) onAsrMetrics(metrics);
+    asrService.transcribeAudio(nextAudio, inputLanguage)
+      .then((result) => {
+        console.log('[VAD] ✅ ASR result:', result.text);
+        if (result.text?.trim()) {
+          onTranscript(result);
+        }
       })
       .catch((err) => {
-        console.error('ASR Error:', err);
+        console.error('[VAD] ❌ ASR Error:', err);
       })
       .finally(() => {
-        isSttQueueRunningRef.current = false;
-        pumpSttQueue();
+        isProcessing.current = false;
+        processQueue();
       });
-  }, [onAsrMetrics, onTranscript]);
+  }, [inputLanguage, onTranscript]);
 
   const handleSpeechEnd = useCallback((audio: Float32Array) => {
     onSpeakingChange(false);
+    console.log('[VAD] 🔴 Speech ended:', audio.length, 'samples');
 
-    sttAudioQueueRef.current.push(audio.slice());
-    if (sttAudioQueueRef.current.length > MAX_STT_AUDIO_QUEUE) {
-      sttAudioQueueRef.current = sttAudioQueueRef.current.slice(-MAX_STT_AUDIO_QUEUE);
+    audioQueue.current.push(audio.slice());
+    if (audioQueue.current.length > MAX_QUEUE_SIZE) {
+      audioQueue.current = audioQueue.current.slice(-MAX_QUEUE_SIZE);
     }
 
-    pumpSttQueue();
-  }, [onSpeakingChange, pumpSttQueue]);
+    processQueue();
+  }, [onSpeakingChange, processQueue]);
 
   const vad = useMicVAD({
-    // Preload model/runtime on mount but keep microphone off until user starts.
     startOnLoad: false,
-    // Flush any active speech chunk when the user pauses listening.
     submitUserSpeechOnPause: true,
-    onSpeechStart: () => onSpeakingChange(true),
+    onSpeechStart: () => {
+      console.log('[VAD] 🎤 Speech started');
+      onSpeakingChange(true);
+    },
     onSpeechEnd: handleSpeechEnd,
     positiveSpeechThreshold: VAD_CONFIG.POSITIVE_SPEECH_THRESHOLD,
     negativeSpeechThreshold: VAD_CONFIG.NEGATIVE_SPEECH_THRESHOLD,
@@ -79,14 +86,17 @@ export function VADController({ isListening, onTranscript, onLog, onSpeakingChan
     model: 'v5',
   });
 
+  // Sync VAD state with isListening prop
   useEffect(() => {
     const syncListeningState = async () => {
       if (vad.loading || vad.errored) return;
 
       try {
         if (isListening && !vad.listening) {
+          console.log('[VAD] Starting...');
           await vad.start();
         } else if (!isListening && vad.listening) {
+          console.log('[VAD] Stopping...');
           await vad.pause();
           onSpeakingChange(false);
         }
@@ -99,26 +109,24 @@ export function VADController({ isListening, onTranscript, onLog, onSpeakingChan
     void syncListeningState();
   }, [isListening, vad.loading, vad.errored, vad.listening, vad.start, vad.pause, onLog, onSpeakingChange]);
 
+  // Log VAD loading status
   useEffect(() => {
     if (prevLoading.current && !vad.loading) {
       prevLoading.current = false;
       if (vad.errored) {
         onLog(`✗ VAD failed to load: ${vad.errored}`);
       } else {
-        onLog('✓ Silero VAD ready. You can start listening now.');
+        onLog('✓ Silero VAD ready');
       }
-    }
-    if (vad.loading) {
-      // keep the log updated while loading
     }
   }, [vad.loading, vad.errored, onLog]);
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      sttAudioQueueRef.current = [];
+      audioQueue.current = [];
     };
   }, []);
 
-  // This component renders nothing visible — it's purely a logic controller
   return null;
 }

@@ -1,11 +1,5 @@
 /**
  * Silero VAD Configuration
- * 
- * These parameters control the @ricky0123/vad-react Silero VAD model.
- * Silero VAD uses a neural network to classify speech vs. non-speech frames.
- * Each "frame" is 96 samples at 16kHz (~6ms).
- *
- * Reference: https://github.com/ricky0123/vad
  */
 const parseNumberEnv = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -18,36 +12,13 @@ const parseThresholdEnv = (value: string | undefined, fallback: number) => {
 };
 
 const parsePositiveIntEnv = (value: string | undefined, fallback: number) => {
-  const parsed = Number.parseInt(value ?? '', 10);
+  const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
 export const VAD_CONFIG = {
-  /**
-   * Probability threshold above which a frame is considered speech.
-   * Higher value = less sensitive (ignores soft speech / background noise).
-   * Range: 0.0 – 1.0   Default: 0.5
-   */
-  POSITIVE_SPEECH_THRESHOLD: parseThresholdEnv(import.meta.env['VITE_VAD_POSITIVE_SPEECH_THRESHOLD'], 0.5),
-
-  /**
-   * Probability threshold below which a frame is considered silence.
-   * Should be lower than POSITIVE_SPEECH_THRESHOLD to create hysteresis.
-   * Range: 0.0 – 1.0   Default: 0.35
-   */
-  NEGATIVE_SPEECH_THRESHOLD: parseThresholdEnv(import.meta.env['VITE_VAD_NEGATIVE_SPEECH_THRESHOLD'], 0.35),
-
-  /**
-   * Minimum speech duration (ms) before triggering onSpeechStart.
-   * Prevents very short noises (clicks, pops) from triggering a speech segment.
-   * Default: 250ms
-   */
-  MIN_SPEECH_MS: parsePositiveIntEnv(import.meta.env['VITE_VAD_MIN_SPEECH_MS'], 250),
-
-  /**
-   * Duration of silence (ms) to tolerate inside a speech segment before ending it.
-   * Higher value = more forgiving of short pauses within a sentence.
-   * Default: 300ms
-   */
-  REDEMPTION_MS: parsePositiveIntEnv(import.meta.env['VITE_VAD_REDEMPTION_MS'], 300),
+  POSITIVE_SPEECH_THRESHOLD: parseThresholdEnv(import.meta.env.VITE_VAD_POSITIVE_SPEECH_THRESHOLD, 0.5),
+  NEGATIVE_SPEECH_THRESHOLD: parseThresholdEnv(import.meta.env.VITE_VAD_NEGATIVE_SPEECH_THRESHOLD, 0.35),
+  MIN_SPEECH_MS: parsePositiveIntEnv(import.meta.env.VITE_VAD_MIN_SPEECH_MS, 250),
+  REDEMPTION_MS: parsePositiveIntEnv(import.meta.env.VITE_VAD_REDEMPTION_MS, 300),
 };

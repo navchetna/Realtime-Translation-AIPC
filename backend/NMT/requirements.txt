@@ -1,5 +1,0 @@
-fastapi
-uvicorn
-transformers==4.50.0 
-sentencepiece==0.2.1
-openvino==2025.4.1

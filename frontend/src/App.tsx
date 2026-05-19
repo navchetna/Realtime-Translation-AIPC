@@ -1,908 +1,420 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
-import styles from './App.module.css';
-import { Sidebar } from './components/Sidebar';
-import { TranslationPanel } from './components/TranslationPanel';
+/**
+ * Main Application Component
+ * Real-time Speech-to-Speech Translation with VAD
+ */
+
+import { useState, useEffect } from 'react';
 import { VADController } from './components/VADController';
-import { Activity, MicOff, Loader2, AlertCircle, FileText } from 'lucide-react';
-import { ENABLE_SENTENCE_COMPLETENESS_BUFFER, MIN_TRANSCRIPT_BUFFER_WORDS, PREDEFINED_SUMMARY_TEXT } from './config/appConfig';
-import { TranslationService } from './services/TranslationService';
-import { TtsService, TTS_SUPPORTED_LANGUAGES } from './services/TtsService';
-import type { NmtMetrics } from './services/TranslationService';
-import type { AsrMetrics } from './services/AsrService';
-import type { TtsMetrics } from './services/TtsService';
-
-const STREAMABLE_LANGUAGES = [...TTS_SUPPORTED_LANGUAGES];
-const MAX_STREAM_AUDIO_QUEUE = 6;
-const STREAM_AUDIO_SETTINGS_KEY = 'realtime-translation:stream-audio-settings';
-
-type StreamAudioItem = {
-  text: string;
-  language: string;
-  forcePlayback?: boolean;
-};
-
-type AudioPlaybackItem = {
-  audioBlob: Blob;
-  metrics: TtsMetrics | null;
-};
+import { TranscriptionPanel } from './components/TranscriptionPanel';
+import { MetricsDisplay } from './components/MetricsDisplay';
+import { ConfigPanel } from './components/ConfigPanel';
+import { asrService } from './services/AsrService';
+import { ttsService } from './services/TtsService';
+import { translationService } from './services/TranslationService';
+import { MODEL_NAMES, DEFAULT_CONFIG } from './config/apiConfig';
+import type {
+  TranscriptionResult,
+  TranslationResult,
+  SessionMetrics,
+} from './types';
+import './App.css';
 
 function App() {
-  const [vadReady, setVadReady] = useState(false);
-  const [vadError, setVadError] = useState(false);
+  // Listening state
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
-  const [isTranslating, setIsTranslating] = useState(false);
-  const [panelCount, setPanelCount] = useState(2);
-  const [panelTargets, setPanelTargets] = useState<Record<string, string>>({
-    'panel-1': 'Hindi',
-    'panel-2': 'English',
+  // Configuration (initialized from environment)
+  const [inputLanguage, setInputLanguage] = useState(DEFAULT_CONFIG.inputLanguage);
+  const [outputLanguage, setOutputLanguage] = useState(DEFAULT_CONFIG.outputLanguage);
+  const [ttsVoice, setTtsVoice] = useState(DEFAULT_CONFIG.ttsVoice);
+  const [ttsSpeed, setTtsSpeed] = useState(DEFAULT_CONFIG.ttsSpeed);
+
+  // UI state
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
+
+  // Transcriptions
+  const [englishTranscriptions, setEnglishTranscriptions] = useState<TranscriptionResult[]>([]);
+  const [japaneseTranscriptions, setJapaneseTranscriptions] = useState<TranslationResult[]>([]);
+
+  // Metrics
+  const [metrics, setMetrics] = useState<SessionMetrics>({
+    asrRTF: 0,
+    llmTokensPerSec: 0,
+    ttsRTF: 0,
+    totalLatency: 0,
   });
-  const [panelTranslations, setPanelTranslations] = useState<Record<string, string>>({
-    'panel-1': '',
-    'panel-2': '',
+
+  // Session stats
+  const [sessionStats, setSessionStats] = useState({
+    translationCount: 0,
+    totalAudioTime: 0,
+    avgRTF: 0,
   });
-  const [isStreamAudioEnabled, setIsStreamAudioEnabled] = useState(false);
-  const [streamAudioLanguage, setStreamAudioLanguage] = useState<string>('Hindi');
-  const [streamAudioQueueSize, setStreamAudioQueueSize] = useState(0);
-  const [isStreamingAudioActive, setIsStreamingAudioActive] = useState(false);
-  const [hasUnsavedStreamAudioSettings, setHasUnsavedStreamAudioSettings] = useState(false);
-  const [streamAudioSettingsMessage, setStreamAudioSettingsMessage] = useState('');
-  const MAX_TRANSLATION_LINES = 40;
-  const MAX_TRANSLATION_QUEUE = 8;
-  const translationQueueRef = useRef<string[]>([]);
-  const isTranslationQueueRunningRef = useRef(false);
-  const pendingTranscriptBufferRef = useRef('');
-  const lastQueuedTranscriptRef = useRef('');
-  const panelTargetsRef = useRef(panelTargets);
-  const isStreamAudioEnabledRef = useRef(isStreamAudioEnabled);
-  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
-  const activeAudioUrlRef = useRef<string | null>(null);
-  const activeStreamAudioRef = useRef<HTMLAudioElement | null>(null);
-  const activeStreamAudioUrlRef = useRef<string | null>(null);
-  const streamAudioQueueRef = useRef<StreamAudioItem[]>([]);
-  const isStreamQueueRunningRef = useRef(false);
-  const MAX_AUDIO_PLAYBACK_QUEUE = 10;
-  const audioPlaybackQueueRef = useRef<AudioPlaybackItem[]>([]);
-  const isAudioPlaybackRunningRef = useRef(false);
-  const [audioPlaybackQueueSize, setAudioPlaybackQueueSize] = useState(0);
-  const processedStreamLineCountsRef = useRef<Record<string, number>>({});
 
-  const [, setLastAsrMetrics] = useState<AsrMetrics | null>(null);
-  const [, setLastNmtMetrics] = useState<NmtMetrics | null>(null);
-  const [, setLastTtsMetrics] = useState<TtsMetrics | null>(null);
+  // Service health
+  const [servicesHealthy, setServicesHealthy] = useState(false);
 
-  const availableStreamAudioLanguages = Array.from(
-    new Set(
-      Object.values(panelTargets).filter((language) =>
-        STREAMABLE_LANGUAGES.includes(language as typeof STREAMABLE_LANGUAGES[number])
-      )
-    )
-  );
-
-  const addLog = useCallback((msg: string) => {
-    if (msg.startsWith('✓')) {
-      setVadReady(true);
-      setVadError(false);
-    }
-    if (msg.startsWith('✗')) {
-      setVadError(true);
-      setVadReady(false);
-      setIsListening(false);
-      setIsSpeaking(false);
-    }
-  }, []);
-
-  const appendChunk = useCallback((existing: string, nextChunk: string) => {
-    if (!nextChunk.trim()) return existing;
-    const combined = existing ? `${existing}\n${nextChunk}` : nextChunk;
-    const lines = combined.split('\n').filter(line => line.trim().length > 0);
-    return lines.slice(-MAX_TRANSLATION_LINES).join('\n');
-  }, []);
-
-  const pumpTranslationQueue = useCallback(() => {
-    if (isTranslationQueueRunningRef.current) {
-      return;
-    }
-
-    const sourceTranscript = translationQueueRef.current.shift();
-    if (!sourceTranscript) {
-      setIsTranslating(false);
-      return;
-    }
-
-    isTranslationQueueRunningRef.current = true;
-    setIsTranslating(true);
-
-    const currentTargets = { ...panelTargetsRef.current };
-
-    TranslationService.translateBatch(
-      sourceTranscript,
-      Object.values(currentTargets),
-      'en'
-    )
-      .then(({ results: languageResults, metrics: nmtMetrics }) => {
-        if (nmtMetrics) setLastNmtMetrics(nmtMetrics);
-
-        setPanelTranslations(prev => {
-          const updated: Record<string, string> = { ...prev };
-          for (const panelId of Object.keys(currentTargets)) {
-            updated[panelId] = appendChunk(prev[panelId] || '', languageResults[currentTargets[panelId]] || '');
-          }
-          return updated;
-        });
-      })
-      .catch((error) => {
-        console.warn('Sequential NMT queue item failed:', error);
-      })
-      .finally(() => {
-        isTranslationQueueRunningRef.current = false;
-        pumpTranslationQueue();
-      });
-  }, [appendChunk]);
-
-  const getWordCount = useCallback((text: string) => {
-    return text.trim().split(/\s+/).filter(Boolean).length;
-  }, []);
-
-  const hasSentenceEnd = useCallback((text: string) => {
-    return /[.!?…।]\s*$/.test(text.trim());
-  }, []);
-
-  const endsAbruptly = useCallback((text: string) => {
-    const incompleteEndings = new Set([
-      'and', 'or', 'but', 'so', 'because', 'if', 'then',
-      'the', 'a', 'an', 'to', 'of', 'in', 'on', 'for', 'with'
-    ]);
-
-    const words = text.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    const lastWord = words[words.length - 1];
-    return !!lastWord && incompleteEndings.has(lastWord);
-  }, []);
-
-  const isCompleteSentence = useCallback((text: string) => {
-    const normalized = text.trim();
-    if (!normalized) return false;
-    if (getWordCount(normalized) < MIN_TRANSCRIPT_BUFFER_WORDS) return false;
-    if (!hasSentenceEnd(normalized)) return false;
-    if (endsAbruptly(normalized)) return false;
-    return true;
-  }, [endsAbruptly, getWordCount, hasSentenceEnd]);
-
-  const enqueueTranscriptForTranslation = useCallback((text: string) => {
-    const normalized = text.trim();
-    if (!normalized || normalized === lastQueuedTranscriptRef.current) {
-      return;
-    }
-
-    lastQueuedTranscriptRef.current = normalized;
-    translationQueueRef.current.push(normalized);
-    if (translationQueueRef.current.length > MAX_TRANSLATION_QUEUE) {
-      translationQueueRef.current = translationQueueRef.current.slice(-MAX_TRANSLATION_QUEUE);
-    }
-
-    pumpTranslationQueue();
-  }, [pumpTranslationQueue]);
-
-  const flushPendingTranscriptBuffer = useCallback(() => {
-    const pendingTranscript = pendingTranscriptBufferRef.current.trim();
-    if (!pendingTranscript) {
-      return;
-    }
-
-    pendingTranscriptBufferRef.current = '';
-    enqueueTranscriptForTranslation(pendingTranscript);
-  }, [enqueueTranscriptForTranslation]);
-
-  const handleTranscript = useCallback((text: string) => {
-    const normalized = text.trim();
-    if (!normalized) {
-      return;
-    }
-
-    if (ENABLE_SENTENCE_COMPLETENESS_BUFFER) {
-      const buffered = pendingTranscriptBufferRef.current.trim();
-      const combined = [buffered, normalized].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-      if (!combined) {
-        return;
-      }
-
-      if (!isCompleteSentence(combined)) {
-        pendingTranscriptBufferRef.current = combined;
-        return;
-      }
-
-      pendingTranscriptBufferRef.current = '';
-      enqueueTranscriptForTranslation(combined);
-      return;
-    }
-
-    const pendingTranscript = pendingTranscriptBufferRef.current.trim();
-    if (pendingTranscript) {
-      pendingTranscriptBufferRef.current = '';
-      enqueueTranscriptForTranslation(`${pendingTranscript} ${normalized}`.replace(/\s+/g, ' ').trim());
-      return;
-    }
-
-    if (getWordCount(normalized) < MIN_TRANSCRIPT_BUFFER_WORDS) {
-      pendingTranscriptBufferRef.current = normalized;
-      return;
-    }
-
-    enqueueTranscriptForTranslation(normalized);
-  }, [enqueueTranscriptForTranslation, getWordCount, isCompleteSentence]);
-
-  const handlePanelLanguageChange = useCallback((panelId: string, language: string) => {
-    setPanelTargets(prev => ({ ...prev, [panelId]: language }));
-    setPanelTranslations(prev => ({ ...prev, [panelId]: '' }));
-  }, []);
-
-  const handlePanelCountChange = useCallback((newCount: number) => {
-    const clamped = Math.max(1, Math.min(4, newCount));
-    setPanelCount(clamped);
-
-    const newTargets: Record<string, string> = {};
-    const newTranslations: Record<string, string> = {};
-    const defaultLanguages = ['Hindi', 'English', 'Kannada', 'Tamil'];
-
-    for (let i = 1; i <= clamped; i++) {
-      const panelId = `panel-${i}`;
-      newTargets[panelId] = panelTargets[panelId] || defaultLanguages[i - 1] || 'English';
-      newTranslations[panelId] = panelTranslations[panelId] || '';
-    }
-
-    setPanelTargets(newTargets);
-    setPanelTranslations(newTranslations);
-  }, [panelTargets, panelTranslations]);
-
+  // Check service health on mount
   useEffect(() => {
-    panelTargetsRef.current = panelTargets;
-  }, [panelTargets]);
+    checkServicesHealth();
+  }, []);
 
-  useEffect(() => {
-    isStreamAudioEnabledRef.current = isStreamAudioEnabled;
-  }, [isStreamAudioEnabled]);
-
-  useEffect(() => {
-    if (!isListening) {
-      flushPendingTranscriptBuffer();
-    }
-  }, [flushPendingTranscriptBuffer, isListening]);
-
-  useEffect(() => {
+  const checkServicesHealth = async () => {
     try {
-      const raw = window.localStorage.getItem(STREAM_AUDIO_SETTINGS_KEY);
-      if (!raw) {
-        return;
-      }
+      const [asrHealthy, ttsHealthy, llmHealthy] = await Promise.all([
+        asrService.checkHealth(),
+        ttsService.checkHealth(),
+        translationService.checkHealth(),
+      ]);
 
-      const parsed = JSON.parse(raw) as {
-        isStreamAudioEnabled?: boolean;
-        streamAudioLanguage?: string;
+      const allHealthy = asrHealthy && ttsHealthy && llmHealthy;
+      setServicesHealthy(allHealthy);
+
+      if (!allHealthy) {
+        console.warn('Some services are not healthy:', {
+          asrHealthy,
+          ttsHealthy,
+          llmHealthy,
+        });
+      }
+    } catch (error) {
+      console.error('Health check failed:', error);
+      setServicesHealthy(false);
+    }
+  };
+
+  // Handle new transcription from VAD
+  const handleTranscript = async (result: TranscriptionResult) => {
+    if (!result.text.trim()) {
+      console.log('[App] Empty transcription, skipping');
+      return;
+    }
+
+    console.log('[App] New transcription:', result.text);
+
+    // Add English transcription
+    setEnglishTranscriptions((prev) => [...prev, result]);
+
+    // Update ASR metrics
+    if (result.metrics) {
+      setMetrics((prev) => ({
+        ...prev,
+        asrRTF: result.metrics!.rtf,
+      }));
+    }
+
+    try {
+      const pipelineStartTime = performance.now();
+
+      // Translate text
+      console.log('[App] Translating text...');
+      const translationStartTime = performance.now();
+      const translation = await translationService.translateText(
+        result.text,
+        inputLanguage,
+        outputLanguage
+      );
+      const translationTime = (performance.now() - translationStartTime) / 1000;
+
+      console.log('[App] Translation received:', translation.text.substring(0, 100));
+
+      // Update LLM metrics
+      setMetrics((prev) => ({
+        ...prev,
+        llmTokensPerSec: translation.metrics.tokensPerSec,
+      }));
+
+      // Create translation result (without audio initially)
+      const translationResult: TranslationResult = {
+        text: translation.text,
+        timestamp: new Date(),
+        audioBlob: undefined,
+        metrics: translation.metrics,
       };
 
-      if (typeof parsed.isStreamAudioEnabled === 'boolean') {
-        setIsStreamAudioEnabled(parsed.isStreamAudioEnabled);
-        isStreamAudioEnabledRef.current = parsed.isStreamAudioEnabled;
+      // Add translation to UI immediately (even if TTS fails later)
+      setJapaneseTranscriptions((prev) => [...prev, translationResult]);
+      console.log('[App] Translation added to UI');
+
+      // Try to generate speech (don't block translation display if this fails)
+      try {
+        console.log('[App] Generating speech...');
+        const ttsStartTime = performance.now();
+        const { blob: audioBlob, metrics: ttsMetrics } = await ttsService.synthesizeSpeech(
+          translation.text,
+          outputLanguage,
+          ttsVoice,
+          ttsSpeed
+        );
+        const ttsTime = (performance.now() - ttsStartTime) / 1000;
+
+        // Calculate total pipeline latency (processing time only, not audio duration)
+        // ASR inference time + Translation request time + TTS inference time
+        const asrInferenceTime = result.metrics?.inference_time_s || 0;
+        const totalLatency = asrInferenceTime + translationTime + ttsTime;
+
+        // Update metrics
+        setMetrics((prev) => ({
+          ...prev,
+          ttsRTF: ttsMetrics.rtf,
+          totalLatency: totalLatency,
+        }));
+
+        // Update the translation with audio blob
+        setJapaneseTranscriptions((prev) =>
+          prev.map((item, idx) =>
+            idx === prev.length - 1 ? { ...item, audioBlob } : item
+          )
+        );
+
+        console.log('[App] Pipeline complete:', {
+          asrInference: `${(asrInferenceTime * 1000).toFixed(0)}ms`,
+          translation: `${(translationTime * 1000).toFixed(0)}ms`,
+          ttsInference: `${(ttsTime * 1000).toFixed(0)}ms`,
+          totalLatency: `${(totalLatency * 1000).toFixed(0)}ms`,
+          note: 'End-to-end processing time (not including audio playback duration)',
+        });
+      } catch (ttsError) {
+        console.error('[App] TTS failed (translation still shown):', ttsError);
+
+        // Update latency even if TTS fails (ASR inference + Translation only)
+        const asrInferenceTime = result.metrics?.inference_time_s || 0;
+        const totalLatency = asrInferenceTime + translationTime;
+        setMetrics((prev) => ({
+          ...prev,
+          totalLatency: totalLatency,
+        }));
+
+        console.log('[App] Partial pipeline (TTS failed):', {
+          asrInference: `${(asrInferenceTime * 1000).toFixed(0)}ms`,
+          translation: `${(translationTime * 1000).toFixed(0)}ms`,
+          totalLatency: `${(totalLatency * 1000).toFixed(0)}ms`,
+        });
       }
 
-      if (
-        typeof parsed.streamAudioLanguage === 'string' &&
-        STREAMABLE_LANGUAGES.includes(parsed.streamAudioLanguage as typeof STREAMABLE_LANGUAGES[number])
-      ) {
-        setStreamAudioLanguage(parsed.streamAudioLanguage);
-      }
+      // Update session stats
+      setSessionStats((prev) => ({
+        translationCount: prev.translationCount + 1,
+        totalAudioTime: prev.totalAudioTime + (result.metrics?.audio_duration_s || 0),
+        avgRTF: (prev.avgRTF * prev.translationCount + (result.metrics?.rtf || 0)) / (prev.translationCount + 1),
+      }));
+
+      console.log('[App] Translation pipeline complete');
     } catch (error) {
-      console.warn('Failed to load stream audio settings:', error);
+      console.error('[App] Translation pipeline error:', error);
+      handleError(error as Error);
     }
-  }, []);
+  };
 
-  const getStreamAudioSentences = useCallback((language: string, translations: Record<string, string>, targets: Record<string, string>) => {
-    const panelId = Object.keys(targets).find((key) => targets[key] === language);
-    if (!panelId) {
-      return { lineCount: 0, sentences: [] as string[] };
+  const handleError = (error: Error) => {
+    console.error('[App] Error:', error);
+  };
+
+  const handleLog = (msg: string) => {
+    console.log('[VAD Log]', msg);
+    if (msg.startsWith('✓')) {
+      setServicesHealthy(true);
     }
-
-    const lines = translations[panelId]
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean);
-
-    const splitSentences = (text: string) => {
-      const parts = text.match(/[^.!?।]+[.!?।]?/g);
-      return (parts && parts.length > 0 ? parts : [text]).map((part) => part.trim()).filter(Boolean);
-    };
-
-    const sentences = lines.flatMap((line) => splitSentences(line));
-
-    return {
-      lineCount: lines.length,
-      sentences,
-    };
-  }, []);
-
-  const handleStartListening = useCallback(() => {
-    if (!vadReady || vadError) return;
-
-    if (isListening) {
-      flushPendingTranscriptBuffer();
+    if (msg.startsWith('✗')) {
+      setServicesHealthy(false);
       setIsListening(false);
       setIsSpeaking(false);
-    } else {
-      setIsListening(true);
     }
-  }, [flushPendingTranscriptBuffer, isListening, vadError, vadReady]);
+  };
 
-  const isLoading = !vadReady && !vadError;
-
-  const playSentenceAudio = useCallback(async (sentence: string, targetLanguage: string) => {
-    const { audioBlob, metrics } = await TtsService.synthesize(sentence, targetLanguage);
-    if (metrics) setLastTtsMetrics(metrics);
-
-    if (activeAudioRef.current) {
-      activeAudioRef.current.pause();
-      activeAudioRef.current.currentTime = 0;
-      activeAudioRef.current = null;
-    }
-
-    if (activeAudioUrlRef.current) {
-      URL.revokeObjectURL(activeAudioUrlRef.current);
-      activeAudioUrlRef.current = null;
-    }
-
-    const audioUrl = URL.createObjectURL(audioBlob);
-    const audio = new Audio(audioUrl);
-
-    activeAudioRef.current = audio;
-    activeAudioUrlRef.current = audioUrl;
-
-    const cleanup = () => {
-      if (activeAudioRef.current === audio) {
-        activeAudioRef.current = null;
-      }
-      if (activeAudioUrlRef.current === audioUrl) {
-        URL.revokeObjectURL(audioUrl);
-        activeAudioUrlRef.current = null;
-      }
-    };
-
-    audio.onended = cleanup;
-    audio.onerror = cleanup;
-
-    await audio.play();
-  }, []);
-
-  const stopStreamAudioPlayback = useCallback(() => {
-    streamAudioQueueRef.current = [];
-    audioPlaybackQueueRef.current = [];
-    setStreamAudioQueueSize(0);
-    setAudioPlaybackQueueSize(0);
-    setIsStreamingAudioActive(false);
-    isAudioPlaybackRunningRef.current = false;
-
-    if (activeStreamAudioRef.current) {
-      activeStreamAudioRef.current.pause();
-      activeStreamAudioRef.current.currentTime = 0;
-      activeStreamAudioRef.current = null;
-    }
-
-    if (activeStreamAudioUrlRef.current) {
-      URL.revokeObjectURL(activeStreamAudioUrlRef.current);
-      activeStreamAudioUrlRef.current = null;
-    }
-  }, []);
-
-  const pumpAudioPlaybackQueue = useCallback(() => {
-    if (isAudioPlaybackRunningRef.current) {
-      return;
-    }
-
-    if (audioPlaybackQueueRef.current.length === 0) {
-      setIsStreamingAudioActive(false);
-      return;
-    }
-
-    isAudioPlaybackRunningRef.current = true;
-    setIsStreamingAudioActive(true);
-
-    const nextPlaybackItem = audioPlaybackQueueRef.current.shift();
-    setAudioPlaybackQueueSize(audioPlaybackQueueRef.current.length);
-
-    if (!nextPlaybackItem) {
-      isAudioPlaybackRunningRef.current = false;
-      pumpAudioPlaybackQueue();
-      return;
-    }
-
-    if (activeStreamAudioRef.current) {
-      activeStreamAudioRef.current.pause();
-      activeStreamAudioRef.current.currentTime = 0;
-      activeStreamAudioRef.current = null;
-    }
-
-    if (activeStreamAudioUrlRef.current) {
-      URL.revokeObjectURL(activeStreamAudioUrlRef.current);
-      activeStreamAudioUrlRef.current = null;
-    }
-
-    const audioUrl = URL.createObjectURL(nextPlaybackItem.audioBlob);
-    const audio = new Audio(audioUrl);
-    activeStreamAudioRef.current = audio;
-    activeStreamAudioUrlRef.current = audioUrl;
-
-    const cleanup = () => {
-      audio.onended = null;
-      audio.onerror = null;
-      if (activeStreamAudioRef.current === audio) {
-        activeStreamAudioRef.current = null;
-      }
-      if (activeStreamAudioUrlRef.current === audioUrl) {
-        URL.revokeObjectURL(audioUrl);
-        activeStreamAudioUrlRef.current = null;
-      }
-    };
-
-    audio.onended = () => {
-      cleanup();
-      isAudioPlaybackRunningRef.current = false;
-      pumpAudioPlaybackQueue();
-    };
-
-    audio.onerror = () => {
-      console.warn('Stream audio playback error');
-      cleanup();
-      isAudioPlaybackRunningRef.current = false;
-      pumpAudioPlaybackQueue();
-    };
-
-    audio.play().catch((error) => {
-      console.warn('Stream audio play failed:', error);
-      cleanup();
-      isAudioPlaybackRunningRef.current = false;
-      pumpAudioPlaybackQueue();
-    });
-  }, []);
-
-  const pumpStreamAudioQueue = useCallback(async () => {
-    if (isStreamQueueRunningRef.current) {
-      return;
-    }
-
-    isStreamQueueRunningRef.current = true;
-
-    while (streamAudioQueueRef.current.length > 0) {
-      const nextItem = streamAudioQueueRef.current.shift();
-      setStreamAudioQueueSize(streamAudioQueueRef.current.length);
-
-      if (!nextItem) {
-        continue;
-      }
-
-      if (!nextItem.forcePlayback && !isStreamAudioEnabledRef.current) {
-        continue;
-      }
-
-      try {
-        const { audioBlob, metrics } = await TtsService.synthesize(nextItem.text, nextItem.language);
-        if (metrics) {
-          setLastTtsMetrics(metrics);
-        }
-
-        if (!nextItem.forcePlayback && !isStreamAudioEnabledRef.current) {
-          break;
-        }
-
-        audioPlaybackQueueRef.current.push({ audioBlob, metrics });
-        if (audioPlaybackQueueRef.current.length > MAX_AUDIO_PLAYBACK_QUEUE) {
-          audioPlaybackQueueRef.current = audioPlaybackQueueRef.current.slice(-MAX_AUDIO_PLAYBACK_QUEUE);
-        }
-        setAudioPlaybackQueueSize(audioPlaybackQueueRef.current.length);
-
-        pumpAudioPlaybackQueue();
-      } catch (error) {
-        console.warn('Stream audio generation failed:', error);
-      }
-    }
-
-    isStreamQueueRunningRef.current = false;
-  }, [pumpAudioPlaybackQueue]);
-
-  const enqueueStreamAudio = useCallback((sentences: string[], language: string) => {
-    if (!isStreamAudioEnabledRef.current || !STREAMABLE_LANGUAGES.includes(language as typeof STREAMABLE_LANGUAGES[number])) {
-      return;
-    }
-
-    const nextItems = sentences
-      .map((sentence) => sentence.trim())
-      .filter(Boolean)
-      .map((text) => ({ text, language, forcePlayback: false }));
-
-    if (nextItems.length === 0) {
-      return;
-    }
-
-    streamAudioQueueRef.current.push(...nextItems);
-    if (streamAudioQueueRef.current.length > MAX_STREAM_AUDIO_QUEUE) {
-      streamAudioQueueRef.current = streamAudioQueueRef.current.slice(-MAX_STREAM_AUDIO_QUEUE);
-    }
-    setStreamAudioQueueSize(streamAudioQueueRef.current.length);
-    void pumpStreamAudioQueue();
-  }, [pumpStreamAudioQueue]);
-
-  const enqueueSummaryAudio = useCallback((sentences: string[], language: string) => {
-    if (!STREAMABLE_LANGUAGES.includes(language as typeof STREAMABLE_LANGUAGES[number])) {
-      return;
-    }
-
-    const nextItems = sentences
-      .map((sentence) => sentence.trim())
-      .filter(Boolean)
-      .map((text) => ({ text, language, forcePlayback: true }));
-
-    if (nextItems.length === 0) {
-      return;
-    }
-
-    streamAudioQueueRef.current.push(...nextItems);
-    if (streamAudioQueueRef.current.length > MAX_STREAM_AUDIO_QUEUE) {
-      streamAudioQueueRef.current = streamAudioQueueRef.current.slice(-MAX_STREAM_AUDIO_QUEUE);
-    }
-    setStreamAudioQueueSize(streamAudioQueueRef.current.length);
-    void pumpStreamAudioQueue();
-  }, [pumpStreamAudioQueue]);
-
-  const queueCurrentStreamAudio = useCallback((language: string, translations: Record<string, string>, targets: Record<string, string>) => {
-    const { lineCount, sentences } = getStreamAudioSentences(language, translations, targets);
-    processedStreamLineCountsRef.current[language] = lineCount;
-    enqueueStreamAudio(sentences, language);
-  }, [enqueueStreamAudio, getStreamAudioSentences]);
-
-  const handleStreamAudioEnabledChange = useCallback((enabled: boolean) => {
-    setIsStreamAudioEnabled(enabled);
-    isStreamAudioEnabledRef.current = enabled;
-    setHasUnsavedStreamAudioSettings(true);
-    setStreamAudioSettingsMessage('');
-    if (!enabled) {
-      stopStreamAudioPlayback();
-      return;
-    }
-
-    queueCurrentStreamAudio(streamAudioLanguage, panelTranslations, panelTargets);
-  }, [panelTargets, panelTranslations, queueCurrentStreamAudio, stopStreamAudioPlayback, streamAudioLanguage]);
-
-  const handleStreamAudioLanguageChange = useCallback((language: string) => {
-    setStreamAudioLanguage(language);
-    setHasUnsavedStreamAudioSettings(true);
-    setStreamAudioSettingsMessage('');
-    stopStreamAudioPlayback();
-    if (isStreamAudioEnabledRef.current) {
-      queueCurrentStreamAudio(language, panelTranslations, panelTargets);
-      return;
-    }
-
-    const { lineCount } = getStreamAudioSentences(language, panelTranslations, panelTargets);
-    processedStreamLineCountsRef.current[language] = lineCount;
-  }, [getStreamAudioSentences, panelTargets, panelTranslations, queueCurrentStreamAudio, stopStreamAudioPlayback]);
-
-  const handleSaveStreamAudioSettings = useCallback(() => {
+  // Handle TTS request when user clicks on Japanese translation
+  const handleRequestTTS = async (text: string, index: number): Promise<Blob | undefined> => {
     try {
-      window.localStorage.setItem(
-        STREAM_AUDIO_SETTINGS_KEY,
-        JSON.stringify({
-          isStreamAudioEnabled,
-          streamAudioLanguage,
-        })
+      console.log('[App] Generating TTS for clicked translation:', text.substring(0, 50));
+
+      const { blob: audioBlob } = await ttsService.synthesizeSpeech(
+        text,
+        outputLanguage,
+        ttsVoice,
+        ttsSpeed
       );
-      setHasUnsavedStreamAudioSettings(false);
-      setStreamAudioSettingsMessage('Settings saved');
+
+      // Update the translation with the audio blob
+      setJapaneseTranscriptions((prev) =>
+        prev.map((item, idx) => (idx === index ? { ...item, audioBlob } : item))
+      );
+
+      console.log('[App] TTS generated and added to translation');
+      return audioBlob;
     } catch (error) {
-      console.warn('Failed to save stream audio settings:', error);
-      setStreamAudioSettingsMessage('Save failed');
+      console.error('[App] TTS generation failed:', error);
+      return undefined;
     }
-  }, [isStreamAudioEnabled, streamAudioLanguage]);
+  };
 
-  useEffect(() => {
-    return () => {
-      if (activeAudioRef.current) {
-        activeAudioRef.current.pause();
-        activeAudioRef.current = null;
-      }
-      if (activeAudioUrlRef.current) {
-        URL.revokeObjectURL(activeAudioUrlRef.current);
-        activeAudioUrlRef.current = null;
-      }
-
-      if (activeStreamAudioRef.current) {
-        activeStreamAudioRef.current.pause();
-        activeStreamAudioRef.current = null;
-      }
-
-      if (activeStreamAudioUrlRef.current) {
-        URL.revokeObjectURL(activeStreamAudioUrlRef.current);
-        activeStreamAudioUrlRef.current = null;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isStreamAudioEnabled) {
+  const toggleListening = () => {
+    if (!servicesHealthy && !isListening) {
+      alert('Services are not ready. Please check that ASR and TTS services are running.');
       return;
     }
 
-    const panelId = Object.keys(panelTargets).find((key) => panelTargets[key] === streamAudioLanguage);
-    if (!panelId) {
-      return;
+    setIsListening(!isListening);
+    if (isListening) {
+      setIsSpeaking(false);
     }
+  };
 
-    const lines = panelTranslations[panelId]
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const currentCount = lines.length;
-    const previousCount = processedStreamLineCountsRef.current[streamAudioLanguage] ?? 0;
-
-    if (currentCount < previousCount) {
-      processedStreamLineCountsRef.current[streamAudioLanguage] = currentCount;
-      return;
+  const clearTranscriptions = (panel: 'english' | 'japanese' | 'both') => {
+    if (panel === 'english' || panel === 'both') {
+      setEnglishTranscriptions([]);
     }
-
-    if (currentCount === previousCount) {
-      return;
+    if (panel === 'japanese' || panel === 'both') {
+      setJapaneseTranscriptions([]);
     }
-
-    processedStreamLineCountsRef.current[streamAudioLanguage] = currentCount;
-
-    const pendingLines = lines.slice(previousCount);
-    if (pendingLines.length === 0) {
-      return;
+    if (panel === 'both') {
+      setSessionStats({
+        translationCount: 0,
+        totalAudioTime: 0,
+        avgRTF: 0,
+      });
     }
+  };
 
-    const pendingSentences = pendingLines.flatMap((line) => {
-      const parts = line.match(/[^.!?।]+[.!?।]?/g);
-      return (parts && parts.length > 0 ? parts : [line]).map((part) => part.trim()).filter(Boolean);
-    });
+  const getStatusMessage = (): string => {
+    if (!servicesHealthy) return 'Services not available';
+    if (!isListening) return 'Ready';
+    if (isSpeaking) return 'Speaking detected';
+    return 'Listening...';
+  };
 
-    if (pendingSentences.length === 0) {
-      return;
-    }
-
-    enqueueStreamAudio(pendingSentences, streamAudioLanguage);
-  }, [enqueueStreamAudio, getStreamAudioSentences, isStreamAudioEnabled, panelTargets, panelTranslations, streamAudioLanguage]);
-
-  useEffect(() => {
-    if (availableStreamAudioLanguages.length === 0) {
-      setIsStreamAudioEnabled(false);
-      isStreamAudioEnabledRef.current = false;
-      stopStreamAudioPlayback();
-      return;
-    }
-
-    if (!availableStreamAudioLanguages.includes(streamAudioLanguage)) {
-      setStreamAudioLanguage(availableStreamAudioLanguages[0]);
-    }
-  }, [availableStreamAudioLanguages, streamAudioLanguage, stopStreamAudioPlayback]);
-
-  useEffect(() => {
-    return () => {
-      pendingTranscriptBufferRef.current = '';
-      translationQueueRef.current = [];
-      audioPlaybackQueueRef.current = [];
-    };
-  }, []);
-
-  const splitTextToSentences = useCallback((text: string) => {
-    const parts = text.match(/[^.!?।]+[.!?।]?/g);
-    return (parts && parts.length > 0 ? parts : [text]).map((part) => part.trim()).filter(Boolean);
-  }, []);
-
-  const hasAnyPanelContent = Object.values(panelTranslations).some((text) => text.trim().length > 0);
-  const canGenerateSummary = !isLoading && !vadError && !isListening && hasAnyPanelContent;
-
-  const handleGenerateSummary = useCallback(() => {
-    if (!canGenerateSummary) {
-      return;
-    }
-
-    const summarySentences = splitTextToSentences(PREDEFINED_SUMMARY_TEXT);
-    if (summarySentences.length === 0) {
-      return;
-    }
-
-    enqueueSummaryAudio(summarySentences, streamAudioLanguage);
-  }, [canGenerateSummary, enqueueSummaryAudio, splitTextToSentences, streamAudioLanguage]);
+  const getStatusColor = (): string => {
+    if (!servicesHealthy) return 'error';
+    if (!isListening) return 'success';
+    if (isSpeaking) return 'active';
+    return 'warning';
+  };
 
   return (
-    <div className={styles.container}>
-      <Sidebar
-        onDeviceSelect={() => {}}
-        panelCount={panelCount}
-        onPanelCountChange={handlePanelCountChange}
-        isStreamAudioEnabled={isStreamAudioEnabled}
-        streamAudioLanguage={streamAudioLanguage}
-        availableStreamAudioLanguages={availableStreamAudioLanguages}
-        streamAudioQueueSize={streamAudioQueueSize}
-        audioPlaybackQueueSize={audioPlaybackQueueSize}
-        isStreamingAudioActive={isStreamingAudioActive}
-        onStreamAudioEnabledChange={handleStreamAudioEnabledChange}
-        onStreamAudioLanguageChange={handleStreamAudioLanguageChange}
-        onSaveSettings={handleSaveStreamAudioSettings}
-        hasUnsavedSettings={hasUnsavedStreamAudioSettings}
-        settingsMessage={streamAudioSettingsMessage}
-      />
-
-      <main className={styles.mainContent}>
-        <header className={styles.header} style={{ justifyContent: 'flex-start', position: 'relative' }}>
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <img
-              src="/intel-logo.png"
-              alt="Intel Logo"
-              style={{
-                height: '40px',
-                filter: 'brightness(1.2) drop-shadow(0 2px 8px rgba(0, 199, 253, 0.3))',
-                transition: 'all 0.3s ease'
-              }}
-            />
-          </div>
-
-          <div
-            style={{
-              position: 'absolute',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              textAlign: 'center',
-              gap: '4px',
-            }}
-          >
-            <h1 style={{ margin: 0 }}>
-              Intel® Core™ Ultra Series 3
-            </h1>
-
-            <h2 style={{ margin: 0 }}>
-              Real-time English Voice to Indic Text
-            </h2>
-          </div>
-
-          <div style={{ position: 'absolute', right: '12px', top: '-28px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
-            <div
-              style={{
-                position: 'relative',
-                width: '120px',
-                height: '80px',
-                borderRadius: '0',
-                overflow: 'hidden',
-                opacity: 0.82,
-              }}
-            >
-              <img
-                src="/cat_eyes.jpg"
-                alt="Cat"
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                  opacity: 0.94,
-                  filter: 'brightness(1.4) saturate(0.9) blur(0.1px)',
-                }}
-              />
-              <div
-                aria-hidden="true"
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.12) 0%, rgba(30, 41, 59, 0.22) 55%, rgba(15, 23, 42, 0.32) 100%)',
-                  pointerEvents: 'none',
-                }}
-              />
-            </div>
-
-            <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-              {vadError && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger)' }}>
-                  <AlertCircle size={18} /> VAD failed to load
-                </div>
-              )}
-            </div>
-
-          </div>
-        </header>
-
-        <div className={styles.translationGrid} style={{ gridTemplateColumns: `repeat(${panelCount}, minmax(0, 1fr))` }}>
-          {Array.from({ length: panelCount }, (_, i) => {
-            const panelId = `panel-${i + 1}`;
-            const variantMap: Record<number, 'Color1' | 'Color2' | 'Color3' | 'Color1'> = { 0: 'Color1', 1: 'Color2', 2: 'Color3', 3: 'Color1' };
-            return (
-              <TranslationPanel
-                key={panelId}
-                id={panelId}
-                targetLang={panelTargets[panelId] || 'English'}
-                translatedText={panelTranslations[panelId] || ''}
-                isTranslating={isTranslating}
-                onTargetLangChange={handlePanelLanguageChange}
-                onSpeakSentence={playSentenceAudio}
-                variant={variantMap[i]}
-              />
-            );
-          })}
-        </div>
-
-        {!vadError && (
-          <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-              <button
-                className={styles.button}
-                style={{
-                  background: isListening ? 'rgba(239, 68, 68, 0.25)' : 'var(--primary)',
-                  border: isListening ? '1px solid rgba(239, 68, 68, 0.45)' : '1px solid transparent',
-                  color: isListening ? '#fecaca' : 'white',
-                  padding: '12px 24px',
-                  borderRadius: '30px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  opacity: isLoading ? 0.7 : 1,
-                  cursor: isLoading ? 'not-allowed' : 'pointer',
-                }}
-                onClick={handleStartListening}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <><Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> Loading VAD...</>
-                ) : isListening ? (
-                  <><MicOff size={18} /> Stop Listening</>
-                ) : (
-                  <><Activity size={18} /> Start Listening</>
-                )}
-              </button>
-
-              {isListening && !isLoading && isSpeaking && (
-                <div className={styles.liveIndicator}>
-                  <div className={styles.liveDot} />
-                  Capturing Speech...
-                </div>
-              )}
-              {isListening && !isLoading && !isSpeaking && (
-                <div className={styles.liveIndicator} style={{ background: 'rgba(245, 158, 11, 0.1)', color: 'var(--warning)' }}>
-                  <div className={styles.liveDot} style={{ background: 'var(--warning)', animation: 'none' }} />
-                  Listening...
-                </div>
-              )}
-            </div>
-
-            <button
-              className={styles.button}
-              style={{
-                background: 'rgba(16, 185, 129, 0.18)',
-                border: '1px solid rgba(16, 185, 129, 0.45)',
-                padding: '12px 20px',
-                borderRadius: '30px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                color: '#d1fae5',
-              }}
-              onClick={handleGenerateSummary}
-              disabled={!canGenerateSummary}
-              title="Queues predefined summary sentences for TTS playback"
-            >
-              <FileText size={18} /> Generate Summary
-            </button>
-          </div>
-        )}
-
-        <div className={styles.disclaimerText}>
-          This is an AI generated content and may not be fully accurate.
-        </div>
-      </main>
-
+    <div className="app">
+      {/* VAD Controller (always mounted, controlled via isListening prop) */}
       <VADController
         isListening={isListening}
+        inputLanguage={inputLanguage}
         onTranscript={handleTranscript}
-        onLog={addLog}
+        onLog={handleLog}
         onSpeakingChange={setIsSpeaking}
-        onAsrMetrics={setLastAsrMetrics}
+      />
+
+      {/* Header */}
+      <header className="header">
+        <div className="header-content">
+          <h1>English to Japanese Real-time Translation</h1>
+          <button className="config-trigger-btn" onClick={() => setIsConfigOpen(true)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 1v6m0 6v6M1 12h6m6 0h6" />
+              <path d="M4.22 4.22l4.24 4.24m5.08 5.08l4.24 4.24M4.22 19.78l4.24-4.24m5.08-5.08l4.24-4.24" />
+            </svg>
+            Settings
+          </button>
+        </div>
+      </header>
+
+      {/* Main Layout with Sidebar */}
+      <div className="main-layout">
+        {/* Sidebar with Listen Button and Metrics */}
+        <aside className="sidebar">
+          <button
+            className={`listen-btn ${isListening ? 'stop' : 'start'} ${isSpeaking ? 'detecting' : ''}`}
+            onClick={toggleListening}
+            disabled={!servicesHealthy && !isListening}
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              {isListening ? (
+                <>
+                  <rect x="6" y="4" width="4" height="16" />
+                  <rect x="14" y="4" width="4" height="16" />
+                </>
+              ) : (
+                <>
+                  <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+                  <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+                </>
+              )}
+            </svg>
+            <span>{isListening ? (isSpeaking ? 'Detecting Audio...' : 'Listening...') : 'Start Listening'}</span>
+          </button>
+
+          <div className={`status-indicator status-${getStatusColor()}`}>
+            <span className="status-dot"></span>
+            <span className="status-text">{getStatusMessage()}</span>
+          </div>
+
+          {/* Compact Metrics */}
+          <div className="sidebar-metrics">
+            <h4>Performance</h4>
+            <MetricsDisplay metrics={metrics} />
+          </div>
+
+          {/* Compact Models */}
+          <div className="sidebar-models">
+            <h4>Models</h4>
+            <div className="model-list">
+              <div className="model-item">
+                <span className="model-icon">🎤</span>
+                <div>
+                  <div className="model-label">ASR</div>
+                  <div className="model-name">{MODEL_NAMES.ASR}</div>
+                </div>
+              </div>
+              <div className="model-item">
+                <span className="model-icon">🤖</span>
+                <div>
+                  <div className="model-label">LLM</div>
+                  <div className="model-name">{MODEL_NAMES.LLM}</div>
+                </div>
+              </div>
+              <div className="model-item">
+                <span className="model-icon">🔊</span>
+                <div>
+                  <div className="model-label">TTS</div>
+                  <div className="model-name">{MODEL_NAMES.TTS}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        {/* Main Content Area */}
+        <div className="content-area">
+          {/* Transcription Panels */}
+          <div className="transcription-area">
+            <TranscriptionPanel
+              title="🇬🇧 English Input"
+              transcriptions={englishTranscriptions}
+              onClear={() => clearTranscriptions('english')}
+            />
+            <TranscriptionPanel
+              title="🇯🇵 Japanese Output"
+              transcriptions={japaneseTranscriptions}
+              onClear={() => clearTranscriptions('japanese')}
+              isJapanese
+              onRequestTTS={handleRequestTTS}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Configuration Drawer */}
+      <ConfigPanel
+        isOpen={isConfigOpen}
+        onClose={() => setIsConfigOpen(false)}
+        isListening={isListening}
+        inputLanguage={inputLanguage}
+        outputLanguage={outputLanguage}
+        ttsVoice={ttsVoice}
+        ttsSpeed={ttsSpeed}
+        sessionStats={sessionStats}
+        onInputLanguageChange={setInputLanguage}
+        onOutputLanguageChange={setOutputLanguage}
+        onTtsVoiceChange={setTtsVoice}
+        onTtsSpeedChange={setTtsSpeed}
       />
     </div>
   );

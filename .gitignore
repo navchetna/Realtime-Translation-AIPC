@@ -17,6 +17,8 @@ build/
 develop-eggs/
 dist/
 downloads/
+ov_model_fp16
+supertonic-3
 eggs/
 .eggs/
 lib/

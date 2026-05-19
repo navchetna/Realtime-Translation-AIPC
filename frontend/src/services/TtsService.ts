@@ -1,111 +1,134 @@
-export interface TtsMetrics {
-  latency_ms: number;
-  audio_duration_s: number;
-  rtf: number;
-  characters_processed?: number;
-  synthesis_speed_chars_per_sec?: number;
-}
+import { API_CONFIG } from '../config/apiConfig';
 
-export interface TtsSynthesizeResult {
-  audioBlob: Blob;
-  metrics: TtsMetrics | null;
-}
+class TtsService {
+  private baseUrl: string;
 
-export const TTS_SUPPORTED_LANGUAGES = [
-  'Hindi',
-  'Bengali',
-  'Tamil',
-  'Telugu',
-  'Kannada',
-  'Malayalam',
-  'Punjabi',
-] as const;
+  constructor() {
+    this.baseUrl = API_CONFIG.TTS_URL;
+  }
 
-export class TtsService {
-  private static readonly ttsLangMap: Record<string, string> = {
-    Hindi: 'hi',
-    Bengali: 'bn',
-    Tamil: 'ta',
-    Telugu: 'te',
-    Kannada: 'kn',
-    Malayalam: 'ml',
-    Punjabi: 'pa',
-  };
+  /**
+   * Calculate audio duration from WAV blob
+   */
+  private async getAudioDuration(blob: Blob): Promise<number> {
+    try {
+      // Read WAV header to get duration
+      const arrayBuffer = await blob.arrayBuffer();
+      const view = new DataView(arrayBuffer);
 
-  static async synthesize(text: string, targetLanguage: string): Promise<TtsSynthesizeResult> {
-    const sentence = text.trim();
-    if (!sentence) {
-      throw new Error('Cannot synthesize empty text');
+      // Check if it's a valid WAV file
+      const riff = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+      if (riff !== 'RIFF') {
+        console.warn('[TTS] Not a valid WAV file');
+        return 0;
+      }
+
+      // Get sample rate (bytes 24-27)
+      const sampleRate = view.getUint32(24, true);
+
+      // Get byte rate (bytes 28-31)
+      const byteRate = view.getUint32(28, true);
+
+      // Get data size (bytes 40-43 for standard WAV)
+      const dataSize = view.getUint32(40, true);
+
+      // Calculate duration: dataSize / byteRate
+      const duration = dataSize / byteRate;
+
+      return duration;
+    } catch (error) {
+      console.error('[TTS] Failed to parse audio duration:', error);
+      return 0;
     }
+  }
 
-    const sourceLanguage = this.ttsLangMap[targetLanguage];
-    if (!sourceLanguage) {
-      throw new Error(`TTS is not available for ${targetLanguage}`);
+  async checkHealth(): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.baseUrl}/health`, {
+        method: 'GET',
+      });
+      return response.ok;
+    } catch (error) {
+      console.error('[TTS] Health check failed:', error);
+      return false;
     }
+  }
 
-    const apiUrl = import.meta.env.VITE_TTS_API_URL || 'http://localhost:5000/tts';
-    const usePipelinePayload = apiUrl.includes('/services/inference/pipeline');
+  async synthesizeSpeech(
+    text: string,
+    language: string = 'ja',
+    voice: string = 'alloy',
+    speed: number = 1.0
+  ): Promise<{ blob: Blob; metrics: { rtf: number; inferenceTime: number; audioDuration: number } }> {
+    const startTime = performance.now();
 
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(
-        usePipelinePayload
-          ? {
-              pipelineTasks: [
-                {
-                  taskType: 'tts',
-                  config: {
-                    language: {
-                      sourceLanguage,
-                    },
-                    gender: 'female',
-                    samplingRate: 48000,
-                  },
-                },
-              ],
-              inputData: {
-                input: [
-                  {
-                    source: sentence,
-                  },
-                ],
-              },
-            }
-          : {
-              text: sentence,
-              language: sourceLanguage,
-              gender: 'female',
-              samplingRate: 48000,
-            }
-      ),
-    });
+    try {
+      console.log('[TTS] Synthesizing:', {
+        text: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
+        language,
+        voice,
+        speed,
+      });
 
-    if (!response.ok) {
-      throw new Error(`TTS request failed with status: ${response.status}`);
+      const response = await fetch(`${this.baseUrl}/v1/audio/speech`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'tts-1',
+          input: text,
+          voice: voice,
+          language: language,
+          speed: speed,
+          response_format: 'wav',
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[TTS] API error:', response.status, errorText);
+        throw new Error(`TTS failed: ${response.status} ${response.statusText}`);
+      }
+
+      const blob = await response.blob();
+      const inferenceTime = (performance.now() - startTime) / 1000;
+
+      // Try to get RTF from header (if backend provides it)
+      const rtfHeader = response.headers.get('X-RTF');
+      let rtf = rtfHeader ? parseFloat(rtfHeader) : 0;
+
+      // Try to get audio duration from header
+      const durationHeader = response.headers.get('X-Audio-Duration');
+      let audioDuration = durationHeader ? parseFloat(durationHeader) : 0;
+
+      // If audio duration not in header, parse it from the WAV file
+      if (audioDuration === 0) {
+        audioDuration = await this.getAudioDuration(blob);
+      }
+
+      // Calculate RTF: inference_time / audio_duration
+      if (audioDuration > 0) {
+        rtf = inferenceTime / audioDuration;
+      }
+
+      console.log('[TTS] Synthesis complete:', {
+        audioSize: `${(blob.size / 1024).toFixed(1)}KB`,
+        inferenceTime: `${(inferenceTime * 1000).toFixed(0)}ms`,
+        audioDuration: `${audioDuration.toFixed(2)}s`,
+        rtf: rtf.toFixed(3),
+        interpretation: rtf < 1 ? 'faster than realtime' : 'slower than realtime',
+      });
+
+      return {
+        blob,
+        metrics: { rtf, inferenceTime, audioDuration },
+      };
+    } catch (error) {
+      console.error('[TTS] Synthesis error:', error);
+      throw error;
     }
-
-    const data = await response.json();
-    const base64Audio = usePipelinePayload
-      ? data?.pipelineResponse?.[0]?.audio?.[0]?.audioContent
-      : data?.audioContent;
-    const metrics = (usePipelinePayload
-      ? data?.pipelineResponse?.[0]?.metrics
-      : data?.metrics) as TtsMetrics | undefined;
-
-    if (!base64Audio || typeof base64Audio !== 'string') {
-      throw new Error('Invalid TTS response: audio content missing');
-    }
-
-    const binaryString = atob(base64Audio);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i += 1) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-
-    return {
-      audioBlob: new Blob([bytes], { type: 'audio/wav' }),
-      metrics: metrics ?? null,
-    };
   }
 }
+
+export const ttsService = new TtsService();

@@ -1,194 +1,147 @@
-export interface NmtMetrics {
-  latency_ms: number;
-  approx_tokens: number;
-  tokens_per_sec: number;
-}
+/**
+ * Translation Service
+ * Handles text translation using Ollama
+ */
 
-export interface TranslateBatchResult {
-  results: Record<string, string>;
-  metrics: NmtMetrics | null;
-}
+import { API_CONFIG, LLM_TRANSLATION_PROMPT } from '../config/apiConfig';
+import type { TranslationMetrics } from '../types';
 
 export class TranslationService {
-  private static langMap: Record<string, string> = {
-    "English": "en",
-    "Hindi": "hi",
-    "Bengali": "bn",
-    "Tamil": "ta",
-    "Telugu": "te",
-    "Kannada": "kn",
-    "Malayalam": "ml",
-    "Marathi": "mr",
-    "Gujarati": "gu",
-    "Punjabi": "pa",
-    "Odia": "or"
-  };
+  private readonly baseUrl: string;
+  private readonly modelName: string;
+
+  constructor(baseUrl: string = API_CONFIG.LLM_URL, modelName: string = API_CONFIG.OLLAMA_MODEL) {
+    this.baseUrl = baseUrl;
+    this.modelName = modelName;
+  }
 
   /**
-   * Sends a transcript to the NMT (Machine Translation) backend to get a translated text.
+   * Translate text from source to target language
    */
-  static async translateText(text: string, targetLanguage: string, sourceLanguage: string = "en"): Promise<string> {
-    // Route to appropriate server: en→indic on 8003, indic→indic on 8004
-    let apiUrl = import.meta.env.VITE_NMT_API_URL;
-    if (!apiUrl) {
-      apiUrl = sourceLanguage === "en" ? 'http://localhost:8003/services/inference/pipeline' : 'http://localhost:8004/services/inference/pipeline';
-    }
-    const tgtCode = this.langMap[targetLanguage] || "hi";
-    
-    // NMT backend requires source and target to differ.
-    if (sourceLanguage === tgtCode) return text;
+  async translateText(
+    text: string,
+    sourceLang: string = 'en',
+    targetLang: string = 'ja'
+  ): Promise<{ text: string; metrics: TranslationMetrics }> {
+    const startTime = performance.now();
 
     try {
-      const response = await fetch(apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
+      console.log('[Translation] Translating:', {
+        text: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
+        sourceLang,
+        targetLang,
+      });
+
+      // Format the translation prompt (single message, no conversation history)
+      const formattedPrompt = LLM_TRANSLATION_PROMPT
+        .replace('{sourceLang}', this.getLanguageName(sourceLang))
+        .replace('{targetLang}', this.getLanguageName(targetLang))
+        .replace('{text}', text);
+
+      // Call Ollama API (OpenAI-compatible format)
+      const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          pipelineTasks: [
+          model: this.modelName,
+          messages: [
             {
-              taskType: "translation",
-              config: {
-                language: {
-                  sourceLanguage: sourceLanguage,
-                  targetLanguage: tgtCode
-                },
-                serviceId: "indictrans2-indic-indic"
-              }
-            }
+              role: 'user',
+              content: formattedPrompt,
+            },
           ],
-          inputData: {
-            input: [
-              {
-                source: text
-              }
-            ]
-          }
-        })
+          temperature: 0.3,
+          max_tokens: 256,
+          stream: false,
+        }),
       });
 
       if (!response.ok) {
-        throw new Error(`NMT request failed with status: ${response.status}`);
+        const errorText = await response.text();
+        console.error('[Translation] API error response:', errorText);
+        throw new Error(`Ollama API failed: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
-      return data.pipelineResponse[0].output[0].target;
-    } catch (e) {
-      console.warn("NMT backend failed, falling back to mock response.", e);
-      // Fallback
-      return `[${targetLanguage}] ${text}`;
+      console.log('[Translation] Raw API response:', JSON.stringify(data, null, 2));
+
+      const translatedText = data.choices?.[0]?.message?.content?.trim() || '';
+
+      if (!translatedText) {
+        console.warn('[Translation] Empty translation received! Response structure:', {
+          hasChoices: !!data.choices,
+          choicesLength: data.choices?.length,
+          firstChoice: data.choices?.[0],
+        });
+      }
+
+      const endTime = performance.now();
+      const latency = endTime - startTime;
+
+      // Calculate tokens per second from API response
+      const completionTokens = data.usage?.completion_tokens || Math.ceil(translatedText.split(/\s+/).length * 1.3);
+      const tokensPerSec = completionTokens > 0 ? (completionTokens / latency) * 1000 : 0;
+
+      console.log('[Translation] Completed:', {
+        translatedText: translatedText.substring(0, 100) + (translatedText.length > 100 ? '...' : ''),
+        translatedTextLength: translatedText.length,
+        latency: `${latency.toFixed(0)}ms`,
+        completionTokens: completionTokens,
+        tokensPerSec: tokensPerSec.toFixed(1),
+        model: data.model,
+        usage: data.usage,
+      });
+
+      return {
+        text: translatedText,
+        metrics: {
+          tokensPerSec,
+          latency_ms: latency,
+        },
+      };
+    } catch (error) {
+      console.error('[Translation] Error:', error);
+      throw error;
     }
   }
 
-  static async translateBatch(
-    text: string,
-    targetLanguages: string[],
-    sourceLanguage: string = "en",
-    signal?: AbortSignal
-  ): Promise<TranslateBatchResult> {
-    const normalizedSource = text.trim();
-    if (!normalizedSource) {
-      return { results: {}, metrics: null };
-    }
+  /**
+   * Get full language name from code
+   */
+  private getLanguageName(code: string): string {
+    const languageNames: Record<string, string> = {
+      en: 'English',
+      ja: 'Japanese',
+      es: 'Spanish',
+      fr: 'French',
+      de: 'German',
+      it: 'Italian',
+      pt: 'Portuguese',
+      ru: 'Russian',
+      ko: 'Korean',
+      zh: 'Chinese',
+      ar: 'Arabic',
+      hi: 'Hindi',
+    };
 
-    // Route to appropriate server: en→indic on 8003, indic→indic on 8004
-    let apiUrl = import.meta.env.VITE_NMT_API_URL;
-    if (!apiUrl) {
-      apiUrl = sourceLanguage === "en" ? 'http://localhost:8003/services/inference/pipeline' : 'http://localhost:8004/services/inference/pipeline';
-    }
+    return languageNames[code] || code;
+  }
 
-    const uniqueTargets = Array.from(new Set(targetLanguages));
-    const languageCodes = uniqueTargets.map((langName) => ({
-      langName,
-      code: this.langMap[langName] || 'hi',
-    }));
-
-    const passthrough: Record<string, string> = {};
-    const requests = languageCodes
-      .filter(({ code, langName }) => {
-        if (code === sourceLanguage) {
-          passthrough[langName] = normalizedSource;
-          return false;
-        }
-        return true;
-      })
-      .map(({ code }) => ({
-        source: normalizedSource,
-        targetLanguage: code,
-      }));
-
-    if (requests.length === 0) {
-      return { results: passthrough, metrics: null };
-    }
-
+  /**
+   * Check service health
+   */
+  async checkHealth(): Promise<boolean> {
     try {
-      const payload = {
-        pipelineTasks: [
-          {
-            taskType: 'translation',
-            config: {
-              language: {
-                sourceLanguage,
-              },
-              serviceId: 'indictrans2-indic-indic',
-            },
-          },
-        ],
-        inputData: {
-          requests,
-        },
-      };
-
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        signal,
-        body: JSON.stringify(payload),
+      const response = await fetch(`${this.baseUrl}/health`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(3000),
       });
-
-      if (!response.ok) {
-        throw new Error(`NMT batch request failed with status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      const outputs = data?.pipelineResponse?.[0]?.output || [];
-
-      const byCode: Record<string, string> = {};
-      outputs.forEach((item: any, index: number) => {
-        if (item?.targetLanguage && typeof item.target === 'string') {
-          byCode[item.targetLanguage] = item.target;
-          return;
-        }
-
-        // Backward compatibility: some server versions don't include targetLanguage in output.
-        const req = requests[index];
-        if (req && typeof item?.target === 'string') {
-          byCode[req.targetLanguage] = item.target;
-        }
-      });
-
-      const result: Record<string, string> = { ...passthrough };
-      for (const { langName, code } of languageCodes) {
-        // Skip languages already handled as passthrough (source == target).
-        if (langName in passthrough) continue;
-        result[langName] = byCode[code] || `[${langName}] ${normalizedSource}`;
-      }
-      return {
-        results: result,
-        metrics: (data?.pipelineResponse?.[0]?.metrics as NmtMetrics) ?? null,
-      };
-    } catch (e) {
-      if (e instanceof DOMException && e.name === 'AbortError') {
-        return { results: {}, metrics: null };
-      }
-      console.warn('NMT batch backend failed, falling back to mock responses.', e);
-      const fallback: Record<string, string> = {};
-      for (const lang of uniqueTargets) {
-        fallback[lang] = `[${lang}] ${normalizedSource}`;
-      }
-      return { results: fallback, metrics: null };
+      return response.ok;
+    } catch {
+      // Mock service is always "healthy" for development
+      return true;
     }
   }
 }
+
+export const translationService = new TranslationService();
