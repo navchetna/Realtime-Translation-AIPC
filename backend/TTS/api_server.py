@@ -16,6 +16,7 @@ import openvino as ov
 from openvino import Core
 import soundfile as sf
 from fastapi import FastAPI, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 # Import helper functions
@@ -249,6 +250,15 @@ app = FastAPI(
     title="OpenAI-Compatible TTS API",
     description="Text-to-Speech API compatible with OpenAI's TTS endpoint",
     version="1.0.0"
+)
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for development
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods (GET, POST, OPTIONS, etc.)
+    allow_headers=["*"],  # Allow all headers
 )
 
 # Global TTS engine and voice styles
