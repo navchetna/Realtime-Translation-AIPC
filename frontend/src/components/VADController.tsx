@@ -6,6 +6,7 @@ import { VAD_CONFIG } from '../config/vadConfig';
 
 interface Props {
   isListening: boolean;
+  sourceLang: string;
   onTranscript: (text: string) => void;
   onLog: (msg: string) => void;
   onSpeakingChange: (speaking: boolean) => void;
@@ -17,7 +18,7 @@ interface Props {
  * This ensures useMicVAD (which loads a ~2MB ONNX model) never blocks the
  * initial page render.
  */
-export function VADController({ isListening, onTranscript, onLog, onSpeakingChange, onAsrMetrics }: Props) {
+export function VADController({ isListening, sourceLang, onTranscript, onLog, onSpeakingChange, onAsrMetrics }: Props) {
   const prevLoading = useRef(true);
 
   const handleSpeechEnd = useCallback(async (audio: Float32Array) => {
@@ -25,7 +26,7 @@ export function VADController({ isListening, onTranscript, onLog, onSpeakingChan
     try {
       const exactPcmBytes = new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength).slice();
       const audioBlob = new Blob([exactPcmBytes], { type: 'application/octet-stream' });
-      const { text, metrics } = await AsrService.transcribeAudio(audioBlob);
+      const { text, metrics } = await AsrService.transcribeAudio(audioBlob, sourceLang);
       if (text?.trim()) onTranscript(text);
       if (metrics && onAsrMetrics) onAsrMetrics(metrics);
     } catch (err) {

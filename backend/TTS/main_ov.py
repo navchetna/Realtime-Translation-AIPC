@@ -123,9 +123,11 @@ class Text2SpeechApp:
                 self.vocoder_model[gender] = load_hifigan_vocoder(
                     f"{language}_latest", gender, device, self.dtype)
                 with torch.no_grad():
-                    self.vocoder_model[gender] = ov.convert_model(self.vocoder_model[gender], example_input=torch.ones([1, 160, MAX_DEFAULT_VALUE]))
+                    vocoder_ov = ov.convert_model(self.vocoder_model[gender], example_input=torch.ones([1, 160, MAX_DEFAULT_VALUE]))
                 
-                self.vocoder_model[gender] = ov.compile_model(self.vocoder_model[gender], device_name="CPU")
+                vocoder_ov.reshape([1, 160, MAX_DEFAULT_VALUE])
+                vocoder_device = os.getenv("TTS_VOCODER_DEVICE", "NPU")
+                self.vocoder_model[gender] = ov.compile_model(vocoder_ov, device_name=vocoder_device)
                 print(
                     f"Loaded HiFi-GAN vocoder for {language}-{gender}")
 

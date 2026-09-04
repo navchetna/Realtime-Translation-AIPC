@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, useState } from 'react';
+import { useRef, useEffect, useMemo } from 'react';
 import styles from '../App.module.css';
 
 interface Props {
@@ -7,7 +7,6 @@ interface Props {
   translatedText: string;
   isTranslating: boolean;
   onTargetLangChange: (panelId: string, language: string) => void;
-  onSpeakSentence: (sentence: string, targetLanguage: string) => Promise<void>;
   variant?: 'Color1' | 'Color2' | 'Color3';
 }
 
@@ -24,11 +23,8 @@ const LANGUAGES = [
   "Odia"
 ];
 
-export const TranslationPanel: React.FC<Props> = ({ id, targetLang, translatedText, isTranslating, onTargetLangChange, onSpeakSentence, variant }) => {
+export const TranslationPanel: React.FC<Props> = ({ id, targetLang, translatedText, isTranslating, onTargetLangChange, variant }) => {
   const bodyRef = useRef<HTMLDivElement>(null);
-  const [selectedSentence, setSelectedSentence] = useState('');
-  const [isSpeakingSentence, setIsSpeakingSentence] = useState(false);
-  const [speechError, setSpeechError] = useState('');
 
   const sentences = useMemo(() => {
     const result: string[] = [];
@@ -59,20 +55,6 @@ export const TranslationPanel: React.FC<Props> = ({ id, targetLang, translatedTe
     }
   }, [translatedText]);
 
-  const handleSentenceClick = async (sentence: string) => {
-    setSelectedSentence(sentence);
-    setSpeechError('');
-    setIsSpeakingSentence(true);
-    try {
-      await onSpeakSentence(sentence, targetLang);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Audio playback failed';
-      setSpeechError(message);
-    } finally {
-      setIsSpeakingSentence(false);
-    }
-  };
-
   return (
     <div className={`${styles.panel} ${variant ? styles['panel' + variant] : ''}`} key={id}>
       <div className={styles.panelHeader}>
@@ -93,30 +75,29 @@ export const TranslationPanel: React.FC<Props> = ({ id, targetLang, translatedTe
       <div className={styles.panelBody} ref={bodyRef}>
         {translatedText ? (
           <div className={styles.sentenceList}>
-            {sentences.map((sentence, index) => (
-              <button
-                type="button"
-                key={`${sentence}-${index}`}
-                className={`${styles.sentenceButton}${selectedSentence === sentence ? ` ${styles.sentenceButtonSelected}` : ''}`}
-                onClick={() => {
-                  void handleSentenceClick(sentence);
-                }}
-                disabled={isSpeakingSentence}
-                title="Click to play this sentence"
-              >
-                {sentence}
-              </button>
-            ))}
+            {sentences.map((sentence, index) => {
+              const distFromEnd = sentences.length - 1 - index;
+              const isLatest = distFromEnd === 0;
+              const opacity = isLatest ? 1 : distFromEnd === 1 ? 0.55 : distFromEnd === 2 ? 0.35 : 0.2;
+              return (
+                <div
+                  key={`${sentence}-${index}`}
+                  className={`${styles.sentenceItem}${isLatest ? ` ${styles.sentenceLatest}` : ''}`}
+                  style={{ opacity, transition: 'opacity 0.4s ease, font-weight 0.4s ease' }}
+                >
+                  {sentence}
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div className={styles.panelPlaceholder}>
             Select a target language and speak.
             <br /> <br />
-            Translations will stream here. Click any sentence to hear audio.
+            Translations will stream here.
           </div>
         )}
         {isTranslating && <span className={styles.streamingText}>. . .</span>}
-        {speechError && <div className={styles.speechError}>{speechError}</div>}
       </div>
     </div>
   );

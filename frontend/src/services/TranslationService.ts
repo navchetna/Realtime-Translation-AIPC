@@ -78,14 +78,15 @@ export class TranslationService {
   static async translateBatch(
     text: string,
     targetLanguages: string[],
-    sourceLanguage: string = "hi"
+    sourceLanguage: string = "hi",
+    apiUrl?: string
   ): Promise<TranslateBatchResult> {
     const normalizedSource = text.trim();
     if (!normalizedSource) {
       return { results: {}, metrics: null };
     }
 
-    const apiUrl = import.meta.env.VITE_NMT_API_URL || 'http://localhost:8004/services/inference/pipeline';
+    const url = apiUrl || import.meta.env.VITE_NMT_API_URL || 'http://localhost:8004/services/inference/pipeline';
 
     const uniqueTargets = Array.from(new Set(targetLanguages));
     const languageCodes = uniqueTargets.map((langName) => ({
@@ -112,6 +113,7 @@ export class TranslationService {
     }
 
     try {
+      const serviceId = sourceLanguage === 'en' ? 'indictrans2-en-indic' : 'indictrans2-indic-indic';
       const payload = {
         pipelineTasks: [
           {
@@ -120,7 +122,7 @@ export class TranslationService {
               language: {
                 sourceLanguage,
               },
-              serviceId: 'indictrans2-indic-indic',
+              serviceId,
             },
           },
         ],
@@ -129,7 +131,7 @@ export class TranslationService {
         },
       };
 
-      const response = await fetch(apiUrl, {
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
