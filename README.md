@@ -1,291 +1,125 @@
-# Real-time Multi-lingual Translation Demo
+# Realtime Translation Demo (AI PC)
 
-A high-performance, real-time application for translating continuous speech into multiple Indic languages simultaneously. This project uses advanced AI models for Speech-to-Text (STT) and Neural Machine Translation (NMT), running optimally on Intel hardware via the **OpenVINO** inference engine.
+Real-time speech-to-speech translation running fully on-device on an Intel AI PC. A user speaks in English; the system transcribes the speech, translates it, and speaks the translation back, with live transcripts shown in the browser.
 
-## Features
+## Target
 
-- **Real-Time Speech Capture**: Client-side Voice Activity Detection (VAD) using Silero VAD over ONNX Runtime Web — no server round-trip for silence detection.
-- **IndicConformer ASR**: Processes raw PCM Float32 audio buffers (16 kHz mono) directly — no file I/O overhead. Supports 22 Indic languages.
-- **Tri-Panel Machine Translation**: Transcribed text is sent in a single batch request and translated into 3 configurable Indic languages simultaneously.
-- **Intel-Themed UI**: Glass-morphism aesthetic with live audio detection status and collapsible panels.
-- **Bhashini-Compatible API**: Backend servers expose the Bhashini pipeline API format, making them drop-in replaceable with the cloud service.
+Demonstrate low-latency, fully local voice translation using Intel hardware (CPU/GPU via OpenVINO), without any cloud dependency:
 
----
+- **Speech recognition**: Whisper (OpenVINO GenAI)
+- **Translation**: a local LLM served by Ollama
+- **Speech synthesis**: Supertonic TTS (OpenVINO)
 
 ## Architecture
 
 ```
 Microphone
+    │  audio
+    ▼
+[Frontend — port 3000]     React + TypeScript UI
     │
-    ▼
-[Browser — Silero VAD]          client-side silence detection (ONNX Runtime Web)
-    │  audio chunk (Float32 PCM)
-    ▼
-[STT Server — port 8002]        IndicConformer ASR  (OpenVINO, FP16)
-    │  transcript text
-    ▼
-[NMT Server — port 8004]        IndicTrans2 Indic→Indic  (OpenVINO, FP16)
-    │                           (or port 8003 for EN→Indic)
-    ▼
-[Frontend]                      3 language panels updated in real time
+    ├──► [ASR  — port 8001]   Whisper, OpenVINO       speech → text
+    ├──► [LLM  — port 11434]  Ollama                  text → translated text
+    └──► [TTS  — port 8000]   Supertonic, OpenVINO     text → speech
 ```
 
-### Models
-
-| Component | Model | Format | Device |
-|-----------|-------|--------|--------|
-| ASR | [ai4bharat/indic-conformer-600m-multilingual](https://huggingface.co/ai4bharat/indic-conformer-600m-multilingual) | OpenVINO FP16 | CPU / GPU |
-| NMT Indic→Indic | [ai4bharat/indictrans2-indic-indic-1B](https://huggingface.co/ai4bharat/indictrans2-indic-indic-1B) | OpenVINO FP16 | GPU |
-| NMT EN→Indic | [ai4bharat/indictrans2-en-indic-1B](https://huggingface.co/ai4bharat/indictrans2-en-indic-1B) | OpenVINO FP16 | GPU |
-| VAD | [Silero VAD](https://github.com/snakers4/silero-vad) | ONNX (browser) | — |
-
----
+All three backend services expose OpenAI-compatible REST APIs and run independently; the frontend orchestrates calls between them.
 
 ## Prerequisites
 
-| Tool | Version | Purpose |
-|------|---------|---------|
-| [Node.js](https://nodejs.org/) | 18+ | Frontend dev server & build |
-| [uv](https://github.com/astral-sh/uv) | latest | Python venv + fast package install |
-| Python | 3.10 (STT) / 3.12 (NMT) | Backend servers |
-| Intel GPU driver | latest | OpenVINO GPU inference |
-| HuggingFace account | — | Downloading gated models |
+| Tool | Notes |
+|------|-------|
+| Windows 10/11 (64-bit) | |
+| [Node.js](https://nodejs.org/) 18+ | Frontend dev server and build |
+| [uv](https://github.com/astral-sh/uv) | Python environments for ASR/TTS — installed automatically by the setup scripts if missing |
+| [Ollama](https://ollama.com/) | Local LLM runtime — installed automatically by `backend\LLM\setup.bat` if missing |
+| ffmpeg, espeak-ng | Required by the TTS service — checked/installed by `backend\TTS\setup.bat` |
+| Intel GPU driver (optional) | For OpenVINO GPU acceleration |
 
----
+RAM: 8 GB minimum, 16 GB recommended. Disk: ~5 GB free for models.
 
-## Quick Setup (Windows)
+## Quick Setup
 
-The `setup.bat` script in the repo root handles everything — model download, OpenVINO conversion, and frontend build — in one go.
+Run the centralized setup script from the repo root. It sets up ASR, LLM, TTS and the frontend in sequence:
 
 ```bat
-REM 1. Set your HuggingFace token (required for model downloads)
-set HF_TOKEN=your_hf_token_here
-
-REM 2. Run the full setup
 setup.bat
 ```
 
-The script will:
-1. Create a Python 3.10 venv in `backend/STT/.venv`, install deps, download the IndicConformer model and convert it to OpenVINO FP16.
-2. Create a Python 3.12 venv in `backend/NMT/.venv`, install deps, download both IndicTrans2 models and convert them to OpenVINO FP16.
-3. Run `npm install` in `frontend/`, copy VAD/ONNX Runtime assets, and build the production bundle.
-
-> **Estimated time**: 30–60 min depending on internet speed and GPU (model conversion is the longest step).
-
----
-
 ## Manual Setup
 
-### STT — IndicConformer ASR (`backend/STT`)
+Each component can also be set up individually:
 
 ```bat
-cd backend\STT
-
-REM Create venv (Python 3.10 required)
-uv venv --python=3.10 .venv
-.venv\Scripts\activate
-
-REM Install dependencies
-uv pip install -r requirements.txt
-
-REM Download model from HuggingFace (requires HF_TOKEN env var)
-set HF_TOKEN=your_hf_token_here
-python download_all.py
-REM  -- or using hf CLI:
-REM hf download ai4bharat/indic-conformer-600m-multilingual --local-dir conformer_model
-
-REM Convert ONNX assets to OpenVINO FP16 IR
-python convert_to_openvino_fp16.py
+cd backend\ASR && setup.bat   REM Whisper ASR
+cd backend\LLM && setup.bat   REM Ollama + translation model
+cd backend\TTS && setup.bat   REM Supertonic TTS
+cd frontend     && npm install
 ```
 
-Output models are written to `backend/STT/openvino_models/`.
-
----
-
-### NMT — IndicTrans2 (`backend/NMT`)
-
-```bat
-cd backend\NMT
-
-REM Create venv (Python 3.12 required)
-uv venv --python=3.12 .venv
-.venv\Scripts\activate
-
-REM Install PyTorch (CPU-only build — only needed for conversion)
-uv pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cpu
-
-REM Install remaining dependencies
-uv pip install -r requirements.txt
-uv pip install indictranstoolkit
-
-REM Convert Indic->Indic model (FP16, GPU)
-python convert_indictrans2_ov.py ^
-    --model-name ai4bharat/indictrans2-indic-indic-1B ^
-    --output-dir ./openvino_models/indictrans2-indic-indic-1B-fp16/optimum ^
-    --device GPU --precision FP16
-
-REM Convert EN->Indic model (FP16, GPU)
-python convert_indictrans2_ov.py ^
-    --model-name ai4bharat/indictrans2-en-indic-1B ^
-    --output-dir ./openvino_models/indictrans2-en-indic-1B-fp16/optimum ^
-    --device GPU --precision FP16
-```
-
-Output models are written to `backend/NMT/openvino_models/`.
-
----
-
-### Frontend (`frontend/`)
-
-```bat
-cd frontend
-
-REM Install npm packages
-npm install
-
-REM Copy Silero VAD + ONNX Runtime WASM assets to public/vad-assets
-npm run copy-vad-assets
-
-REM Start development server (http://localhost:5173)
-npm run dev
-
-REM -- or build a production bundle:
-npm run build
-```
-
-> The `predev` and `prebuild` hooks run `copy-vad-assets` automatically, so a plain `npm run dev` is sufficient after the first install.
-
----
+See each folder's README for configuration details:
+- [backend/ASR/README.md](backend/ASR/README.md)
+- [backend/LLM/README.md](backend/LLM/README.md)
+- [backend/TTS/README.md](backend/TTS/README.md)
+- [frontend/README.md](frontend/README.md)
 
 ## Running the Application
 
-Open **four separate terminals** and start each server:
+Start all services at once:
 
 ```bat
-REM Terminal 1 — ASR server (port 8002)
-cd backend\STT
+start_services.bat
+```
+
+Or start each service in its own terminal:
+
+```bat
+REM Terminal 1 — ASR
+cd backend\ASR
 start_server.bat
 
-REM Terminal 2 — NMT Indic->Indic server (port 8004)
-cd backend\NMT
-start_server_indic_indic.bat
+REM Terminal 2 — TTS
+cd backend\TTS
+start_server.bat
 
-REM Terminal 3 — NMT EN->Indic server (port 8003)  [optional]
-cd backend\NMT
-start_server_en_indic.bat
-
-REM Terminal 4 — Frontend dev server (port 5173)
+REM Terminal 3 — Frontend
 cd frontend
 npm run dev
 ```
 
-Then open **http://localhost:5173** in your browser.
+Ollama runs automatically as a background service once installed. Then open **http://localhost:3000** in your browser.
 
----
+## Configuration
 
-## Environment Variables
-
-All variables are optional — defaults work out of the box for local development.
-
-### STT server (`backend/STT/start_server.bat`)
+The frontend reads backend URLs and defaults from environment variables (`frontend/.env.local`):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ASR_DEVICE` | `CPU` | OpenVINO device (`CPU`, `GPU`, `AUTO`) |
-| `ASR_MODEL_DIR` | `openvino_models` | Path to converted OpenVINO ASR models |
-| `ASR_CONFIG_PATH` | `conformer_model` | Path to IndicConformer config dir |
-| `LOG_IO` | `1` | Print input audio size + output transcript per request (`0` to disable) |
+| `VITE_ASR_URL` | `http://localhost:8001` | ASR service URL |
+| `VITE_TTS_URL` | `http://localhost:8000` | TTS service URL |
+| `VITE_LLM_URL` | `http://localhost:11434` | Ollama service URL |
+| `VITE_OLLAMA_MODEL` | `llama3.2` | Ollama model used for translation |
+| `VITE_DEFAULT_INPUT_LANGUAGE` | `en` | Source language |
+| `VITE_DEFAULT_OUTPUT_LANGUAGE` | `ja` | Target language |
 
-### NMT servers (`backend/NMT/start_server_*.bat`)
+## Project Structure
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NMT_DEVICE` | `GPU` | OpenVINO device (`CPU`, `GPU`, `AUTO`) |
-| `NMT_MODEL_DIR` | *(model-specific path)* | Path to converted OpenVINO NMT model |
-| `NMT_MODEL_NAME` | *(HF model id)* | HuggingFace model name for tokenizer |
-| `NMT_WARMUP` | `3` | Number of warmup inference passes at startup |
-| `LOG_IO` | `1` | Print source + translated text per request (`0` to disable) |
-
----
-
-## API Reference
-
-Both backend servers follow the **Bhashini pipeline API** format.
-
-### ASR — `POST http://localhost:8002/services/inference/pipeline`
-
-**Request:**
-```json
-{
-  "pipelineTasks": [{ "taskType": "asr", "config": { "language": { "sourceLanguage": "hi" } } }],
-  "inputData": {
-    "audio": [{ "audioContent": "<base64-encoded-float32-pcm>" }]
-  }
-}
+```
+Realtime-Translation-AIPC/
+├── backend/
+│   ├── ASR/   Whisper speech recognition service (OpenVINO)
+│   ├── LLM/   Ollama-based translation setup
+│   └── TTS/   Supertonic text-to-speech service (OpenVINO)
+├── frontend/      React + TypeScript web UI
+├── setup.bat      Centralized setup for all components
+└── start_services.bat   Starts ASR, TTS and the frontend together
 ```
 
-**Response:**
-```json
-{
-  "pipelineResponse": [{ "taskType": "asr", "output": [{ "source": "नमस्ते दुनिया" }] }]
-}
-```
+## License
 
-### NMT — `POST http://localhost:8004/services/inference/pipeline`
+See individual component licenses:
+- OpenVINO: Apache 2.0
+- Whisper: MIT
+- Ollama: MIT
+- FastAPI: MIT
 
-**Batch request (used by the frontend):**
-```json
-{
-  "pipelineTasks": [{ "taskType": "translation", "config": { "language": { "sourceLanguage": "hi" } } }],
-  "inputData": {
-    "requests": [
-      { "source": "नमस्ते दुनिया", "targetLanguage": "ta" },
-      { "source": "नमस्ते दुनिया", "targetLanguage": "bn" }
-    ]
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "pipelineResponse": [{
-    "taskType": "translation",
-    "output": [
-      { "source": "नमस्ते दुनिया", "target": "வணக்கம் உலகம்", "targetLanguage": "ta" },
-      { "source": "नमस्ते दुनिया", "target": "হ্যালো বিশ্ব", "targetLanguage": "bn" }
-    ]
-  }]
-}
-```
-
-Health check endpoints: `GET /health` on each server.
-
----
-
-## Supported Languages
-
-| Code | Language | ASR | NMT |
-|------|----------|-----|-----|
-| `hi` | Hindi | ✓ | ✓ |
-| `bn` | Bengali | ✓ | ✓ |
-| `ta` | Tamil | ✓ | ✓ |
-| `te` | Telugu | ✓ | ✓ |
-| `kn` | Kannada | ✓ | ✓ |
-| `ml` | Malayalam | ✓ | ✓ |
-| `mr` | Marathi | ✓ | ✓ |
-| `gu` | Gujarati | ✓ | ✓ |
-| `pa` | Punjabi | ✓ | ✓ |
-| `or` | Odia | ✓ | ✓ |
-| `as` | Assamese | ✓ | ✓ |
-| `ur` | Urdu | ✓ | ✓ |
-| `en` | English | — | Source only (EN→Indic server) |
-
----
-
-## Further Reading
-
-- [OpenVINO Documentation](https://docs.openvino.ai/)
-- [OpenVINO Model Optimization Guide](https://docs.openvino.ai/2024/openvino-workflow/model-optimization.html)
-- [IndicTrans2 Paper](https://arxiv.org/abs/2305.16307)
-- [IndicConformer / AI4Bharat](https://github.com/AI4Bharat/)

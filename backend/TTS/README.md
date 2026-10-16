@@ -4,26 +4,27 @@ This directory contains an OpenAI-compatible Text-to-Speech API server using Sup
 
 ## Features
 
-- ✅ OpenAI TTS API compatible endpoints
-- ✅ Multiple audio formats (MP3, WAV, OPUS, FLAC, AAC, PCM)
-- ✅ Multiple voice styles
-- ✅ OpenVINO acceleration (CPU/GPU)
-- ✅ Multilingual support (32+ languages)
-- ✅ Adjustable speed control
-- ✅ FP16/FP32 precision options
+- OpenAI TTS API compatible endpoints
+- Multiple audio formats (MP3, WAV, OPUS, FLAC, AAC, PCM)
+- Multiple voice styles
+- OpenVINO acceleration (CPU/GPU)
+- Multilingual support (32+ languages)
+- Adjustable speed control
+- FP16/FP32 precision options
 
 ## Quick Start
 
 ### 1. Setup
 
-Run the setup script to create the environment, download models, and convert to OpenVINO format:
+Run the setup script to create the environment, download models, and convert them to OpenVINO format:
 
-```bash
-./setup.sh
+```cmd
+setup.bat
 ```
 
 This will:
-- Create a Python virtual environment in `./venv`
+- Check for `uv`, ffmpeg and espeak-ng, installing them automatically where possible
+- Create a Python virtual environment in `.venv`
 - Install all dependencies
 - Clone the Supertonic model repository
 - Convert ONNX models to OpenVINO IR format
@@ -32,8 +33,8 @@ This will:
 
 ### 2. Start the Server
 
-```bash
-./start_server.sh
+```cmd
+start_server.bat
 ```
 
 The server will start on `http://0.0.0.0:8000`
@@ -61,7 +62,7 @@ python test_api.py
 
 ### Environment Variables
 
-Configure the server by setting environment variables before running `start_server.sh`:
+Configure the server by setting environment variables before running `start_server.bat`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -77,11 +78,11 @@ Configure the server by setting environment variables before running `start_serv
 | `DEFAULT_LANGUAGE` | `en` | Default language code |
 
 Example:
-```bash
-export PORT=8080
-export DEVICE=GPU
-export DIFFUSION_STEPS=12
-./start_server.sh
+```cmd
+set PORT=8080
+set DEVICE=GPU
+set DIFFUSION_STEPS=12
+start_server.bat
 ```
 
 ## API Endpoints
@@ -195,17 +196,17 @@ See `/v1/voices` endpoint for full list.
 - `AUTO`: Automatically selects best device
 
 Example for high-quality, GPU-accelerated:
-```bash
-export DEVICE=GPU
-export PRECISION=fp32
-export DIFFUSION_STEPS=12
-./start_server.sh
+```cmd
+set DEVICE=GPU
+set PRECISION=fp32
+set DIFFUSION_STEPS=12
+start_server.bat
 ```
 
 ## Troubleshooting
 
 ### Models not found
-Run `./setup.sh` to download and convert models.
+Run `setup.bat` to download and convert models.
 
 ### Voice not found
 Check available voices with:
@@ -215,9 +216,9 @@ curl http://localhost:8000/v1/voices
 
 ### Slow inference
 Try these options:
-1. Reduce diffusion steps: `export DIFFUSION_STEPS=6`
-2. Use GPU: `export DEVICE=GPU`
-3. Use FP16 precision: `export PRECISION=fp16`
+1. Reduce diffusion steps: `set DIFFUSION_STEPS=6`
+2. Use GPU: `set DEVICE=GPU`
+3. Use FP16 precision: `set PRECISION=fp16`
 
 ### GPU not detected
 Ensure OpenVINO GPU support is installed:
@@ -231,20 +232,18 @@ pip install openvino[gpu]
 ```
 TTS/
 ├── api_server.py              # FastAPI server
-├── requirements_api.txt       # API dependencies
-├── setup.sh                   # Setup script
-├── start_server.sh           # Server startup script
-├── test_api.py               # Test script
-├── Supertonic/               # Supertonic TTS code
-│   ├── inference.py          # OpenVINO inference
-│   ├── convert_to_ov.py      # ONNX to OpenVINO converter
-│   ├── helper.py             # Helper functions
-│   └── requirements.txt      # Core dependencies
-├── venv/                     # Virtual environment (created by setup)
-├── supertonic-3/            # Model repository (downloaded by setup)
-│   ├── onnx/                # ONNX models and configs
-│   └── voice_styles/        # Voice style files
-└── ov_model_fp16/           # Converted OpenVINO models (created by setup)
+├── convert_to_openvino.py     # ONNX to OpenVINO converter
+├── helper.py                  # Text/voice processing helpers
+├── inference.py                # Standalone CLI inference/benchmark tool
+├── requirements.txt            # Dependencies
+├── setup.bat                   # Setup script (uv, ffmpeg, espeak-ng, model conversion)
+├── start_server.bat            # Server startup script
+├── test_api.py                 # Test script
+├── .venv/                      # Virtual environment (created by setup)
+├── supertonic-3/                # Model repository (downloaded by setup)
+│   ├── onnx/                    # ONNX models and configs
+│   └── voice_styles/            # Voice style files
+└── ov_model_fp16/               # Converted OpenVINO models (created by setup)
 ```
 
 ### Adding Custom Voices

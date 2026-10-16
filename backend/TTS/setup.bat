@@ -14,6 +14,77 @@ echo ==========================================
 echo Working directory: %SCRIPT_DIR%
 echo.
 
+REM Step 0: Ensure uv is installed
+echo ------------------------------------------
+echo Step 0: Checking for uv
+echo ------------------------------------------
+where uv >nul 2>&1
+if errorlevel 1 (
+    echo 'uv' not found. Attempting to install it...
+    where winget >nul 2>&1
+    if not errorlevel 1 (
+        winget install --id=astral-sh.uv -e --accept-source-agreements --accept-package-agreements
+    ) else (
+        powershell -NoProfile -ExecutionPolicy ByPass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+    )
+    set "PATH=%USERPROFILE%\.local\bin;%PATH%"
+    where uv >nul 2>&1
+    if errorlevel 1 (
+        echo ERROR: Automatic installation of uv failed.
+        echo        Install it manually from https://github.com/astral-sh/uv and re-run this script.
+        exit /b 1
+    )
+    echo uv installed successfully.
+) else (
+    echo uv is already installed.
+)
+echo.
+
+REM Step 0b: Ensure ffmpeg and espeak-ng are installed (required for audio I/O and phonemization)
+echo ------------------------------------------
+echo Step 0b: Checking for ffmpeg and espeak-ng
+echo ------------------------------------------
+where ffmpeg >nul 2>&1
+if errorlevel 1 (
+    echo ffmpeg not found. Attempting to install it...
+    where winget >nul 2>&1
+    if not errorlevel 1 (
+        winget install --id=Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements
+        set "PATH=%PATH%"
+        where ffmpeg >nul 2>&1
+        if errorlevel 1 (
+            echo WARNING: ffmpeg install finished but it is not on PATH yet.
+            echo          Open a new terminal after setup so PATH changes take effect.
+        ) else (
+            echo ffmpeg installed successfully.
+        )
+    ) else (
+        echo WARNING: winget is not available. Please install ffmpeg manually from https://ffmpeg.org/download.html
+    )
+) else (
+    echo ffmpeg is already installed.
+)
+
+where espeak-ng >nul 2>&1
+if errorlevel 1 (
+    echo espeak-ng not found. Attempting to install it...
+    where winget >nul 2>&1
+    if not errorlevel 1 (
+        winget install --id=espeak-ng -e --accept-source-agreements --accept-package-agreements >nul 2>&1
+    )
+    where espeak-ng >nul 2>&1
+    if errorlevel 1 (
+        echo WARNING: espeak-ng could not be installed automatically.
+        echo          Please install it manually from https://github.com/espeak-ng/espeak-ng/releases
+        echo          and ensure it is added to PATH, then re-open this terminal.
+    ) else (
+        echo espeak-ng installed successfully.
+    )
+) else (
+    echo espeak-ng is already installed.
+)
+echo.
+
 REM Configuration
 SET VENV_DIR=%SCRIPT_DIR%.venv
 SET REPO_DIR=%SCRIPT_DIR%supertonic-3
@@ -51,7 +122,6 @@ if exist "%VENV_DIR%" (
 )
 if errorlevel 1 (
     echo ERROR: Failed to create virtual environment with uv
-    echo Make sure uv is installed: pip install uv
     exit /b 1
 )
 echo Virtual environment ready
@@ -63,7 +133,10 @@ echo Step 2: Installing dependencies with uv
 echo ------------------------------------------
 echo Syncing dependencies from pyproject.toml...
 uv pip install -r requirements.txt --python "%VENV_DIR%\Scripts\python.exe"
-
+if errorlevel 1 (
+    echo ERROR: Failed to install dependencies
+    exit /b 1
+)
 echo Dependencies installed successfully
 echo.
 
@@ -166,9 +239,9 @@ SET /A PACKAGES_TOTAL=5
 for %%p in (fastapi uvicorn openvino openvino-dev soundfile) do (
     uv pip show %%p --python "%VENV_DIR%\Scripts\python.exe" >nul 2>&1
     if errorlevel 1 (
-        echo   x %%p (not installed)
+        echo   x %%p ^(not installed^)
     ) else (
-        echo   + %%p (installed)
+        echo   + %%p ^(installed^)
         SET /A PACKAGES_FOUND+=1
     )
 )
@@ -187,7 +260,7 @@ for %%m in (duration_predictor.xml text_encoder.xml vector_estimator.xml vocoder
         echo   + %%m
         SET /A MODELS_FOUND+=1
     ) else (
-        echo   x %%m (missing)
+        echo   x %%m ^(missing^)
     )
 )
 
@@ -210,7 +283,7 @@ if exist "%VOICE_STYLES_DIR%" (
     dir /b "%VOICE_STYLES_DIR%\*.json" 2>nul | find /c /v "" > temp_count.txt
     set /p VOICE_COUNT=<temp_count.txt
     del temp_count.txt
-    echo   + Voice styles directory found (!VOICE_COUNT! voices)
+    echo   + Voice styles directory found ^(!VOICE_COUNT! voices^)
 ) else (
     echo   ! Voice styles directory not found
 )

@@ -4,39 +4,33 @@ This directory contains an OpenAI-compatible Automatic Speech Recognition (ASR) 
 
 ## Features
 
-- ✅ OpenAI Whisper API compatible endpoints
-- ✅ Transcription (audio to text in original language)
-- ✅ Translation (audio to English text)
-- ✅ Multiple response formats (JSON, text, SRT, VTT, verbose JSON)
-- ✅ Language specification support
-- ✅ OpenVINO acceleration (CPU/GPU)
-- ✅ Legacy API endpoint (backward compatibility)
-- ✅ Multiple audio formats support (WAV, MP3, FLAC, OGG, etc.)
+- OpenAI Whisper API compatible endpoints
+- Transcription (audio to text in original language)
+- Translation (audio to English text)
+- Multiple response formats (JSON, text, SRT, VTT, verbose JSON)
+- Language specification support
+- OpenVINO acceleration (CPU/GPU)
+- Legacy API endpoint (backward compatibility)
+- Multiple audio formats support (WAV, MP3, FLAC, OGG, etc.)
 
 ## Quick Start
 
 ### 1. Setup
 
-Run the setup script to create the environment and install dependencies:
+Run the setup script to create the environment, install dependencies, and download the model:
 
-```bash
-./setup.sh
+```cmd
+setup.bat
 ```
 
 This will:
-- Create a Python virtual environment in `./venv`
+- Check for `uv` and install it automatically if missing
+- Create a Python virtual environment in `.venv`
 - Install all dependencies including OpenVINO GenAI
-- Optionally download the Whisper model
-
-**Note:** The model will be automatically downloaded on first use if not pre-downloaded.
+- Download the Whisper model from HuggingFace
 
 ### 2. Start the Server
 
-```bash
-./start_server.sh
-```
-
-Or on Windows:
 ```cmd
 start_server.bat
 ```
@@ -77,7 +71,7 @@ with open("demo_voice.wav", "rb") as f:
 
 ### Environment Variables
 
-Configure the server by setting environment variables before running `start_server.sh`:
+Configure the server by setting environment variables before running `start_server.bat`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -88,11 +82,11 @@ Configure the server by setting environment variables before running `start_serv
 | `LOG_IO` | `1` | Log input/output (1=enabled, 0=disabled) |
 
 Example:
-```bash
-export PORT=8080
-export ASR_DEVICE=CPU
-export ASR_MODEL_NAME=openvino/whisper-large
-./start_server.sh
+```cmd
+set PORT=8080
+set ASR_DEVICE=CPU
+set ASR_MODEL_NAME=openvino/whisper-large
+start_server.bat
 ```
 
 ## API Endpoints
@@ -235,24 +229,24 @@ Models from OpenVINO Model Zoo:
 - **AUTO**: Automatically selects best device
 
 Example for GPU:
-```bash
-export ASR_DEVICE=GPU
-./start_server.sh
+```cmd
+set ASR_DEVICE=GPU
+start_server.bat
 ```
 
 ### Model Selection
 
 Smaller models are faster but less accurate:
-```bash
-export ASR_MODEL_NAME=openvino/whisper-base  # Fast
-export ASR_MODEL_NAME=openvino/whisper-large  # Accurate
+```cmd
+set ASR_MODEL_NAME=openvino/whisper-base
+set ASR_MODEL_NAME=openvino/whisper-large
 ```
 
 ### Quantized Models
 
 For best performance, use INT4 quantized models:
-```bash
-export ASR_MODEL_NAME=OpenVINO/distil-whisper-large-v3-int4-ov
+```cmd
+set ASR_MODEL_NAME=OpenVINO/distil-whisper-large-v3-int4-ov
 ```
 
 ## Troubleshooting
@@ -270,9 +264,9 @@ pip install openvino[gpu]
 
 ### Slow inference
 Try these options:
-1. Use GPU: `export ASR_DEVICE=GPU`
-2. Use smaller model: `export ASR_MODEL_NAME=openvino/whisper-base`
-3. Use quantized model: `export ASR_MODEL_NAME=OpenVINO/distil-whisper-large-v3-int4-ov`
+1. Use GPU: `set ASR_DEVICE=GPU`
+2. Use smaller model: `set ASR_MODEL_NAME=openvino/whisper-base`
+3. Use quantized model: `set ASR_MODEL_NAME=OpenVINO/distil-whisper-large-v3-int4-ov`
 
 ### Audio format not supported
 Install additional audio codecs:
@@ -287,12 +281,11 @@ pip install soundfile librosa
 ASR/
 ├── server.py              # FastAPI server (OpenAI-compatible)
 ├── requirements.txt       # Dependencies
-├── setup.sh              # Setup script
-├── start_server.sh       # Server startup script (bash)
-├── start_server.bat      # Server startup script (Windows)
-├── README_API.md         # This file
-├── demo_voice.wav        # Demo audio file
-└── venv/                 # Virtual environment (created by setup)
+├── setup.bat              # Setup script (creates .venv, downloads model)
+├── start_server.bat       # Server startup script
+├── test_api.py            # Test script
+├── demo_voice.wav         # Demo audio file
+└── .venv/                 # Virtual environment (created by setup)
 ```
 
 ### Testing

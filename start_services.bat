@@ -1,17 +1,16 @@
 @echo off
-REM Start All Services - Voice-to-Voice Translation System
-REM This script starts ASR, TTS, and Frontend services
+REM Start All Services - Realtime Translation Demo
+REM Starts ASR, TTS and the Frontend. Ollama is expected to run as its own service.
 
 SET ROOT_DIR=%~dp0
 cd /d "%ROOT_DIR%"
 
 echo ==========================================
-echo Voice-to-Voice Translation System
+echo Realtime Translation Demo
 echo Starting All Services...
 echo ==========================================
 echo.
 
-REM Function to check if port is in use
 netstat -ano | findstr ":8001" >nul 2>&1
 if %errorlevel%==0 (
     echo WARNING: Port 8001 already in use ^(ASR Service^)
@@ -29,26 +28,32 @@ if %errorlevel%==0 (
 
 echo.
 
-REM Check if virtual environments exist
-if not exist "backend\ASR\venv" (
+REM Check that each component has been set up
+if not exist "backend\ASR\.venv" (
     echo ERROR: ASR virtual environment not found
     echo Please run: cd backend\ASR ^&^& setup.bat
     pause
     exit /b 1
 )
 
-if not exist "backend\TTS\venv" (
+if not exist "backend\TTS\.venv" (
     echo ERROR: TTS virtual environment not found
     echo Please run: cd backend\TTS ^&^& setup.bat
     pause
     exit /b 1
 )
 
-if not exist "frontend-vad\node_modules" (
+if not exist "frontend\node_modules" (
     echo ERROR: Frontend dependencies not installed
-    echo Please run: cd frontend-vad ^&^& npm install
+    echo Please run: cd frontend ^&^& npm install
     pause
     exit /b 1
+)
+
+where ollama >nul 2>&1
+if errorlevel 1 (
+    echo WARNING: Ollama not found. Translation will not work.
+    echo          Run: cd backend\LLM ^&^& setup.bat
 )
 
 REM Start ASR Service
@@ -63,7 +68,7 @@ timeout /t 2 /nobreak >nul
 
 REM Start Frontend
 echo [3/3] Starting Frontend ^(Port 3000^)...
-start "Frontend" cmd /c "cd /d %ROOT_DIR%frontend-vad && npm run dev"
+start "Frontend" cmd /c "cd /d %ROOT_DIR%frontend && npm run dev"
 timeout /t 2 /nobreak >nul
 
 echo.
@@ -74,13 +79,13 @@ echo.
 echo Services:
 echo   ASR:      http://localhost:8001
 echo   TTS:      http://localhost:8000
+echo   Ollama:   http://localhost:11434
 echo   Frontend: http://localhost:3000
 echo.
 echo Note: Services are running in separate windows
 echo       Close the windows to stop individual services
 echo.
 
-REM Wait and open browser
 echo Opening frontend in 5 seconds...
 timeout /t 5 /nobreak >nul
 start http://localhost:3000

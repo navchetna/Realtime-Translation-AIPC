@@ -14,6 +14,32 @@ echo ==========================================
 echo Working directory: %SCRIPT_DIR%
 echo.
 
+REM Step 0: Ensure uv is installed
+echo ------------------------------------------
+echo Step 0: Checking for uv
+echo ------------------------------------------
+where uv >nul 2>&1
+if errorlevel 1 (
+    echo 'uv' not found. Attempting to install it...
+    where winget >nul 2>&1
+    if not errorlevel 1 (
+        winget install --id=astral-sh.uv -e --accept-source-agreements --accept-package-agreements
+    ) else (
+        powershell -NoProfile -ExecutionPolicy ByPass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+    )
+    set "PATH=%USERPROFILE%\.local\bin;%PATH%"
+    where uv >nul 2>&1
+    if errorlevel 1 (
+        echo ERROR: Automatic installation of uv failed.
+        echo        Install it manually from https://github.com/astral-sh/uv and re-run this script.
+        exit /b 1
+    )
+    echo uv installed successfully.
+) else (
+    echo uv is already installed.
+)
+echo.
+
 REM Configuration
 SET VENV_DIR=%SCRIPT_DIR%.venv
 if not defined MODEL_NAME set MODEL_NAME=OpenVINO/distil-whisper-large-v3-int4-ov
@@ -45,7 +71,6 @@ if exist "%VENV_DIR%" (
 )
 if errorlevel 1 (
     echo ERROR: Failed to create virtual environment with uv
-    echo Make sure uv is installed: pip install uv
     exit /b 1
 )
 echo Virtual environment ready
@@ -72,7 +97,7 @@ echo Model: %MODEL_NAME%
 echo Target directory: %MODEL_DIR%
 echo.
 
-if exist "%MODEL_DIR%\openvino_encoder_model.xml" (
+if exist "%MODEL_DIR%\openvino_encoder_model.bin" (
     echo Model already exists at %MODEL_DIR%
     set /p response="Do you want to re-download it? (y/N): "
     if /i not "!response!"=="y" (
@@ -115,10 +140,10 @@ SET ALL_INSTALLED=1
 for %%p in (fastapi uvicorn openvino openvino-genai soundfile numpy) do (
     uv pip show %%p --python "%VENV_DIR%\Scripts\python.exe" >nul 2>&1
     if errorlevel 1 (
-        echo   x %%p (not installed)
+        echo   x %%p ^(not installed^)
         SET ALL_INSTALLED=0
     ) else (
-        echo   + %%p (installed)
+        echo   + %%p ^(installed^)
     )
 )
 
@@ -130,6 +155,33 @@ if !ALL_INSTALLED!==0 (
 
 echo.
 echo All required packages installed successfully
+echo.
+
+echo Checking model weight files...
+SET /A MODELS_FOUND=0
+SET /A MODELS_TOTAL=3
+
+for %%m in (openvino_encoder_model.bin openvino_decoder_model.bin openvino_detokenizer.bin) do (
+    if exist "%MODEL_DIR%\%%m" (
+        echo   + %%m
+        SET /A MODELS_FOUND+=1
+    ) else (
+        echo   x %%m ^(missing^)
+    )
+)
+
+echo.
+echo Model files found: !MODELS_FOUND! / !MODELS_TOTAL!
+
+if !MODELS_FOUND! LSS !MODELS_TOTAL! (
+    echo.
+    echo ERROR: Model weight files are missing or incomplete.
+    echo        Delete %MODEL_DIR% and re-run setup.bat to re-download.
+    exit /b 1
+)
+
+echo.
+echo All model files verified successfully
 echo.
 
 echo ==========================================

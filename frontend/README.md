@@ -4,13 +4,13 @@ Modern React + TypeScript frontend with Voice Activity Detection (VAD) for real-
 
 ## Features
 
-- 🎤 **Automatic Voice Detection** - Silero VAD v5 neural network
-- 🚀 **Real-time Processing** - Sequential audio queue (max 6 segments)
-- 📊 **Performance Metrics** - RTF, tokens/sec, latency tracking
-- 🌐 **Multi-language Support** - 30+ languages
-- 🎨 **Modern UI** - React + TypeScript + Vite
-- 🔊 **Interactive Playback** - Click Japanese text to play audio
-- ⚙️ **Fully Configurable** - Environment-based configuration
+- **Automatic Voice Detection** - Silero VAD v5 neural network
+- **Real-time Processing** - Sequential audio queue (max 6 segments)
+- **Performance Metrics** - RTF, tokens/sec, latency tracking
+- **Multi-language Support** - 30+ languages
+- **Modern UI** - React + TypeScript + Vite
+- **Interactive Playback** - Click Japanese text to play audio
+- **Fully Configurable** - Environment-based configuration
 
 ## Quick Start
 
@@ -20,30 +20,24 @@ Modern React + TypeScript frontend with Voice Activity Detection (VAD) for real-
 npm install
 ```
 
-### 2. Configure Environment
+### 2. Configure Environment (optional)
 
-Copy `.env.example` to `.env.local`:
+All settings have working defaults (see Configuration section below). To override them, create `.env.local` in this folder and set only the variables you need, e.g.:
 
-```bash
-cp .env.example .env.local
+```env
+VITE_OLLAMA_MODEL=llama3.2
 ```
-
-Edit `.env.local` to configure your setup (see Configuration section below).
 
 ### 3. Setup Ollama
 
 Install and configure Ollama for translation:
 
-```bash
-# Install Ollama from https://ollama.ai
-
-# Pull a model (choose one)
-ollama pull llama3.2
-ollama pull mistral
-ollama pull gemma2
+```cmd
+cd ..\backend\LLM
+setup.bat
 ```
 
-**See [OLLAMA_SETUP.md](./OLLAMA_SETUP.md) for detailed instructions.**
+**See [backend/LLM/README.md](../backend/LLM/README.md) for detailed instructions.**
 
 ### 4. Start Backend Services
 
@@ -86,7 +80,7 @@ VITE_ASR_URL=http://localhost:8001
 VITE_TTS_URL=http://localhost:8000
 VITE_LLM_URL=http://localhost:11434
 
-# Ollama Model (see OLLAMA_SETUP.md)
+# Ollama Model (see backend/LLM/README.md)
 VITE_OLLAMA_MODEL=llama3.2
 ```
 
@@ -133,7 +127,7 @@ Variables available:
 - `{targetLang}` - Target language name
 - `{text}` - Text to translate
 
-**Note:** You can change the Ollama model at any time. See [OLLAMA_SETUP.md](./OLLAMA_SETUP.md) for details.
+**Note:** You can change the Ollama model at any time. See [backend/LLM/README.md](../backend/LLM/README.md) for details.
 
 ### Default Settings
 
@@ -308,7 +302,7 @@ npm run preview
 ### Project Structure
 
 ```
-frontend-vad/
+frontend/
 ├── src/
 │   ├── components/
 │   │   ├── VADController.tsx
@@ -327,7 +321,7 @@ frontend-vad/
 │   ├── App.tsx
 │   ├── App.css
 │   └── main.tsx
-├── .env.example              # Configuration template
+├── .env.local                 # Optional overrides (all settings have defaults)
 ├── package.json
 ├── tsconfig.json
 ├── vite.config.ts
@@ -361,15 +355,15 @@ See `src/types/index.ts` for:
 
 | Browser | Version | Status | Notes |
 |---------|---------|--------|-------|
-| Chrome | 90+ | ✅ Excellent | Recommended |
-| Edge | 90+ | ✅ Excellent | Recommended |
-| Firefox | 88+ | ⚠️ Good | VAD may be slower |
-| Safari | 14+ | ⚠️ Good | Limited mic support |
-| Mobile | Varies | ⚠️ Limited | Restricted mic access |
+| Chrome | 90+ | Excellent | Recommended |
+| Edge | 90+ | Excellent | Recommended |
+| Firefox | 88+ | Good | VAD may be slower |
+| Safari | 14+ | Good | Limited mic support |
+| Mobile | Varies | Limited | Restricted mic access |
 
 ## Ollama Integration
 
-This frontend uses **Ollama** for local LLM-based translation. See [OLLAMA_SETUP.md](./OLLAMA_SETUP.md) for:
+This frontend uses **Ollama** for local LLM-based translation. See [backend/LLM/README.md](../backend/LLM/README.md) for:
 
 - Installing and configuring Ollama
 - Choosing and pulling models
